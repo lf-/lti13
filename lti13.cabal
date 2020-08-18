@@ -9,8 +9,8 @@ description:         A library implementing types for LTI 1.3.
 -- bug-reports:
 license:             LGPL-3
 license-file:        LICENSE
-author:              lf-
-maintainer:          lf-@users.noreply.github.com
+author:              Jade
+maintainer:          Jade <software at lfcode dot ca>
 -- copyright:
 -- category:
 build-type:          Simple
