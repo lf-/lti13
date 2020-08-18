@@ -1,10 +1,20 @@
 cradle:
   multi:
-    - path: "./Setup.hs"
+    - path: "./lti13/Setup.hs"
       config:
         cradle:
           none:
-    - path: "./"
+    - path: "./yesod-auth-lti13/Setup.hs"
+      config:
+        cradle:
+          none:
+    - path: "./lti13"
       config:
         cradle:
           cabal:
+            component: "lib:lti13"
+    - path: "./yesod-auth-lti13"
+      config:
+        cradle:
+          cabal:
+            component: "lib:yesod-auth-lti13"

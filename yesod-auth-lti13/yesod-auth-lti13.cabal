@@ -1,0 +1,30 @@
+cabal-version:       >=1.10
+
+name:                yesod-auth-lti13
+version:             0.1.0.0
+-- synopsis:
+-- description:
+-- bug-reports:
+license:             LGPL-3
+author:              Jade
+maintainer:          Jade <software at lfcode dot ca>
+-- copyright:
+-- category:
+build-type:          Simple
+extra-source-files:  CHANGELOG.md
+
+library
+    hs-source-dirs:      src/
+    exposed-modules:     Yesod.Auth.LTI13
+    ghc-options:         -Wall
+    -- other-modules:
+    -- other-extensions:
+    build-depends:       base >=4.12 && <4.13
+                       , lti13
+                       , microlens
+                       , yesod-auth
+                       , yesod-core
+                       , safe-exceptions
+                       , random
+    -- hs-source-dirs:
+    default-language:    Haskell2010

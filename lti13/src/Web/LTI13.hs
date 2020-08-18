@@ -1,7 +1,24 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE NamedFieldPuns #-}
-module Web.LTI13 where
 
+-- | A basic LTI 1.3 library.
+--   It's intended to be used by implementing routes for 'initiate' and
+--   'handleAuthResponse', and work out the associated parameters thereof.
+module Web.LTI13 (
+        Role(..)
+      , ContextClaim(..)
+      , UncheckedLtiTokenClaims(..)
+      , LtiTokenClaims(..)
+      , validateLtiToken
+      , Lti13Exception(..)
+      , PlatformInfo(..)
+      , Issuer
+      , GetPlatformInfo
+      , AuthFlowConfig(..)
+      , RequestParams
+      , initiate
+      , handleAuthResponse
+    ) where
 import qualified Web.OIDC.Client.Settings as O
 import qualified Web.OIDC.Client.Discovery.Provider as P
 import Web.OIDC.Client.Tokens (nonce, aud, otherClaims, iss, IdTokenClaims)
@@ -23,6 +40,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
 import Data.Text.Encoding (encodeUtf8, decodeUtf8)
 
+-- | Parses a JSON text field to a fixed expected value, failing otherwise
 parseFixed :: (FromJSON a, Eq a, Show a) => Object -> Text -> a -> Parser a
 parseFixed obj field fixedVal =
     obj .: field >>= \v ->
@@ -74,6 +92,9 @@ instance FromJSON ContextClaim where
             <*> v .:? "label"
             <*> v .:? "title"
 
+-- | LTI specific claims on a token. You should not accept this type, and
+--   instead prefer the @newtype@ 'LtiTokenClaims' which has had checking
+--   performed on it.
 data UncheckedLtiTokenClaims = UncheckedLtiTokenClaims
     { messageType :: Text
     , ltiVersion :: Text
@@ -84,6 +105,8 @@ data UncheckedLtiTokenClaims = UncheckedLtiTokenClaims
     , context :: Maybe ContextClaim
     } deriving (Show)
 
+-- | An object representing in the type system a token whose claims have been
+--   validated.
 newtype LtiTokenClaims = LtiTokenClaims UncheckedLtiTokenClaims
 
 limitLength :: (Monad m) => Int -> Text -> m Text
@@ -161,6 +184,8 @@ validateLtiToken pinfo claims =
 -- Helpers for the endpoints you have to implement
 -----------------------------------------------------------
 
+-- | (most of) the exceptions that can arise in LTI 1.3 handling. Some may have
+--   been forgotten, and this is a bug that should be fixed.
 data Lti13Exception
     = InvalidHandshake Text
     -- ^ Error in the handshake format
@@ -188,10 +213,11 @@ data PlatformInfo = PlatformInfo
     , jwksUrl :: String
     }
 
+-- | Issuer/@iss@ field
 type Issuer = Text
 
 -- | Access some persistent storage of the configured platforms and return the
---   PlatformInfo for a given one
+--   PlatformInfo for a given platform by name
 type GetPlatformInfo = Issuer -> IO PlatformInfo
 
 -- | Object you have to provide defining integration points with your app
@@ -200,7 +226,7 @@ data AuthFlowConfig m = AuthFlowConfig
     , haveSeenNonce   :: Nonce -> m Bool
     , myRedirectUri   :: ByteString
     , sessionStore    :: SessionStore m
-    -- ^ note that per the example for haskell-oidc-client, this is intended to
+    -- ^ Note that as in the example for haskell-oidc-client, this is intended to
     --   be partially parameterized already with some separate cookie you give
     --   the browser. You should also store the `iss` in your actual implementation.
     }
@@ -232,6 +258,8 @@ lookupOrThrow name map_ =
         Nothing -> throw $ InvalidHandshake $ "Missing `" <> name <> "`"
         Just a -> return a
 
+-- | Parameters to a request, either in the URL with a @GET@ or in the body
+--   with a @POST@
 type RequestParams = Map.Map Text ByteString
 
 -- | Makes the URL for <http://www.imsglobal.org/spec/security/v1p0/#step-1-third-party-initiated-login IMS Security spec § 5.1.1.2>
