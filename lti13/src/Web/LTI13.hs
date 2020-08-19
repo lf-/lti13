@@ -10,10 +10,11 @@ module Web.LTI13 (
       , UncheckedLtiTokenClaims(..)
       , LtiTokenClaims(..)
       , validateLtiToken
-      , Lti13Exception(..)
+      , LTI13Exception(..)
       , PlatformInfo(..)
       , Issuer
       , GetPlatformInfo
+      , SessionStore(..)
       , AuthFlowConfig(..)
       , RequestParams
       , initiate
@@ -29,13 +30,11 @@ import qualified Jose.Jwk as Jwk
 import Control.Monad (when, (>=>))
 import Control.Exception.Safe (MonadCatch, catch, throwM, Typeable, Exception, MonadThrow, throw)
 import Control.Monad.IO.Class (liftIO, MonadIO)
-import Control.Monad.Fail (MonadFail)
 import Data.Aeson (eitherDecode, FromJSON (parseJSON), Object, withObject, withText, (.:), (.:?))
 import Data.Aeson.Types (Parser)
 import Data.Text (Text)
 import qualified Network.HTTP.Types.URI as URI
-import Network.HTTP.Client (defaultManagerSettings, newManager, responseBody, Manager, HttpException, parseRequest, httpLbs)
-import Data.ByteString (ByteString)
+import Network.HTTP.Client (responseBody, Manager, HttpException, parseRequest, httpLbs)
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
 import Data.Text.Encoding (encodeUtf8, decodeUtf8)
@@ -186,7 +185,7 @@ validateLtiToken pinfo claims =
 
 -- | (most of) the exceptions that can arise in LTI 1.3 handling. Some may have
 --   been forgotten, and this is a bug that should be fixed.
-data Lti13Exception
+data LTI13Exception
     = InvalidHandshake Text
     -- ^ Error in the handshake format
     | DiscoveryException Text
@@ -195,7 +194,7 @@ data Lti13Exception
     -- ^ Token validation error. Per <http://www.imsglobal.org/spec/security/v1p0/#authentication-response-validation Security § 5.1.3>
     --   if you get this, you should return a 401.
     deriving (Show, Typeable)
-instance Exception Lti13Exception
+instance Exception LTI13Exception
 
 -- | Preregistered information about a learning platform
 data PlatformInfo = PlatformInfo
@@ -203,12 +202,12 @@ data PlatformInfo = PlatformInfo
     -- |Issuer value
       platformIssuer :: Issuer
     -- | @deployment_id@ <https://www.imsglobal.org/spec/lti/v1p3/#tool-deployment LTI spec § 3.1.3>
-    , platformDeploymentId :: ByteString
+    , platformDeploymentId :: Text
     -- | @client_id@, one or more per platform; <https://www.imsglobal.org/spec/lti/v1p3/#tool-deployment LTI spec § 3.1.3>
     , platformClientId :: Text
     -- | URL the client is redirected to for <http://www.imsglobal.org/spec/security/v1p0/#step-3-authentication-response auth stage 2>.
     --   See also <http://www.imsglobal.org/spec/security/v1p0/#openid_connect_launch_flow Security spec § 5.1.1>
-    , platformOidcAuthEndpoint :: ByteString
+    , platformOidcAuthEndpoint :: Text
     -- | URL for a JSON object containing the JWK signing keys for the platform
     , jwksUrl :: String
     }
@@ -218,17 +217,17 @@ type Issuer = Text
 
 -- | Access some persistent storage of the configured platforms and return the
 --   PlatformInfo for a given platform by name
-type GetPlatformInfo = Issuer -> IO PlatformInfo
+type GetPlatformInfo m = Issuer -> m PlatformInfo
 
 -- | Object you have to provide defining integration points with your app
 data AuthFlowConfig m = AuthFlowConfig
-    { getPlatformInfo :: GetPlatformInfo
+    { getPlatformInfo :: GetPlatformInfo m
     , haveSeenNonce   :: Nonce -> m Bool
-    , myRedirectUri   :: ByteString
+    , myRedirectUri   :: Text
     , sessionStore    :: SessionStore m
     -- ^ Note that as in the example for haskell-oidc-client, this is intended to
     --   be partially parameterized already with some separate cookie you give
-    --   the browser. You should also store the `iss` in your actual implementation.
+    --   the browser. You should also store the @iss@ in your actual implementation.
     }
 
 rethrow :: (MonadCatch m) => HttpException -> m a
@@ -252,7 +251,7 @@ getJwkSet manager fromUrl = do
 
     jwks j = Jwk.keys <$> eitherDecode j
 
-lookupOrThrow :: (MonadThrow m) => Text -> Map.Map Text ByteString -> m ByteString
+lookupOrThrow :: (MonadThrow m) => Text -> Map.Map Text Text -> m Text
 lookupOrThrow name map_ =
     case Map.lookup name map_ of
         Nothing -> throw $ InvalidHandshake $ "Missing `" <> name <> "`"
@@ -260,38 +259,41 @@ lookupOrThrow name map_ =
 
 -- | Parameters to a request, either in the URL with a @GET@ or in the body
 --   with a @POST@
-type RequestParams = Map.Map Text ByteString
+type RequestParams = Map.Map Text Text
 
 -- | Makes the URL for <http://www.imsglobal.org/spec/security/v1p0/#step-1-third-party-initiated-login IMS Security spec § 5.1.1.2>
 --   upon the § 5.1.1.1 request coming in
-initiate :: (MonadIO m, MonadThrow m, MonadFail m) => AuthFlowConfig IO -> RequestParams -> m ByteString
+--
+--   Returns @(Issuer, RedirectURL)@.
+initiate :: (MonadIO m) => AuthFlowConfig m -> RequestParams -> m (Issuer, Text)
 initiate cfg params = do
     -- we don't care about target link uri since we only support one endpoint
-    [iss', loginHint, _] <- mapM (flip lookupOrThrow params) ["iss", "login_hint", "target_link_uri"]
-    let iss = decodeUtf8 iss'
-        messageHint = Map.lookup "lti_mesage_hint" params
+    res <- liftIO $ mapM (flip lookupOrThrow params) ["iss", "login_hint", "target_link_uri"]
+    -- not actually fallible
+    let [iss, loginHint, _] = res
+    let messageHint = Map.lookup "lti_mesage_hint" params
     PlatformInfo
         { platformOidcAuthEndpoint = endpoint
         , platformClientId = clientId
-        } <- liftIO $ (getPlatformInfo cfg) iss
+        } <- (getPlatformInfo cfg) iss
 
     let ss = sessionStore cfg
-    nonce <- liftIO $ sessionStoreGenerate ss
-    state <- liftIO $ sessionStoreGenerate ss
-    liftIO $ sessionStoreSave ss state nonce
+    nonce <- sessionStoreGenerate ss
+    state <- sessionStoreGenerate ss
+    sessionStoreSave ss state nonce
 
     let query = URI.simpleQueryToQuery $
                 [ ("scope", "openid")
                 , ("response_type", "id_token")
                 , ("client_id", encodeUtf8 clientId)
-                , ("redirect_uri", myRedirectUri cfg)
-                , ("login_hint", loginHint)
+                , ("redirect_uri", encodeUtf8 $ myRedirectUri cfg)
+                , ("login_hint", encodeUtf8 loginHint)
                 , ("state", state)
                 , ("response_mode", "form_post")
                 , ("nonce", nonce)
                 , ("prompt", "none")
-                ] ++ maybe [] (\mh -> [("lti_message_hint", mh)]) messageHint
-    return $ endpoint <> URI.renderQuery True query
+                ] ++ maybe [] (\mh -> [("lti_message_hint", encodeUtf8 mh)]) messageHint
+    return $ (iss, endpoint <> (decodeUtf8 . URI.renderQuery True) query)
 
 -- | Makes a fake OIDC object with the bare minimum attributes to hand to
 --   verification library functions
@@ -323,26 +325,33 @@ fakeOidc jset = O.OIDC
 
 -- | Handle the <http://www.imsglobal.org/spec/security/v1p0/#step-3-authentication-response § 5.1.1.3 Step 3>
 --   response sent to the 'AuthFlowConfig.myRedirectUri'
-handleAuthResponse :: (MonadIO m, MonadThrow m, MonadFail m) => AuthFlowConfig IO -> RequestParams -> Issuer -> m (IdTokenClaims LtiTokenClaims)
-handleAuthResponse cfg params iss = do
-    [state, idToken] <- mapM (flip lookupOrThrow params) ["state", "id_token"]
-    pinfo@PlatformInfo { jwksUrl } <- liftIO $ getPlatformInfo cfg iss
-    -- TODO: this should really probably be cached and take the user's manager
-    mgr <- liftIO $ newManager defaultManagerSettings
+--
+--   Returns @(State, Token)@
+handleAuthResponse :: (MonadIO m)
+    => Manager
+    -> AuthFlowConfig m
+    -> RequestParams
+    -> Issuer
+    -> m (Text, IdTokenClaims LtiTokenClaims)
+handleAuthResponse mgr cfg params iss = do
+    params' <- liftIO $ mapM (flip lookupOrThrow params) ["state", "id_token"]
+    let [state, idToken] = params'
+
+    pinfo@PlatformInfo { jwksUrl } <- getPlatformInfo cfg iss
     jwkSet <- liftIO $ getJwkSet mgr jwksUrl
 
     let ss = sessionStore cfg
         oidc = fakeOidc jwkSet
-    toCheck <- liftIO $ getValidIdTokenClaims ss oidc state (pure idToken)
+    toCheck <- getValidIdTokenClaims ss oidc (encodeUtf8 state) (pure $ encodeUtf8 idToken)
 
     -- present nonce but seen -> error
     -- present nonce unseen -> good
     -- absent nonce -> different error
     nonceSeen <- case nonce toCheck of
-        Just n  -> liftIO $ haveSeenNonce cfg n
+        Just n  -> haveSeenNonce cfg n
         Nothing -> throw $ InvalidLtiToken "missing nonce"
     when nonceSeen (throw $ InvalidLtiToken "nonce seen before")
 
     case validateLtiToken pinfo toCheck of
         Left err  -> throw $ InvalidLtiToken err
-        Right tok -> return tok
+        Right tok -> return (state, tok)

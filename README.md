@@ -9,13 +9,20 @@ This project has not been tested yet. Using it right now is probably foolish.
 
 ## Development setup
 
+Conventions: lines entered in a regular shell start with `$`. Lines that go in
+a `nix-shell` shell start with `[nix-shell]$`.
+
 This project provides Nix files for your convenience in creating a working
-environment.
+development environment. If you would like to install Nix, [there is a guide on
+the official documentation](https://nixos.org/nix/manual/#ch-installing-binary).
 
-Use e.g. `nix-shell` to get a shell with `cabal` and the appropriate dev
-packages.
-
-Build with `cabal new-build`. Get a development repl with `cabal repl`.
+```
+$ nix-shell
+# now you can run commands such as:
+[nix-shell]$ cabal new-build all
+[nix-shell]$ cabal repl
+[nix-shell]$ hoogle server
+```
 
 ## TODOs
 

@@ -30,3 +30,7 @@ library
                        , text
     default-language:    Haskell2010
     ghc-options:         -Wall
+
+source-repository head
+    type: git
+    location: https://github.com/lf-/lti13
