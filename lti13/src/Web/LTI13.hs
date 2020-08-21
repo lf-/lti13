@@ -349,9 +349,9 @@ handleAuthResponse mgr cfg params iss = do
     -- absent nonce -> different error
     nonceSeen <- case nonce toCheck of
         Just n  -> haveSeenNonce cfg n
-        Nothing -> throw $ InvalidLtiToken "missing nonce"
-    when nonceSeen (throw $ InvalidLtiToken "nonce seen before")
+        Nothing -> liftIO $ throw $ InvalidLtiToken "missing nonce"
+    when nonceSeen (liftIO $ throw $ InvalidLtiToken "nonce seen before")
 
     case validateLtiToken pinfo toCheck of
-        Left err  -> throw $ InvalidLtiToken err
+        Left err  -> liftIO $ throw $ InvalidLtiToken err
         Right tok -> return (state, tok)

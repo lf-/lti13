@@ -173,7 +173,7 @@ authLTI13 platformInfo =
     AuthPlugin name (dispatchAuthRequest name authHttpManager platformInfo) login
     where
         name = "lti13"
-        login tm = [whamlet|Login via your Learning Management System|]
+        login _ = [whamlet|Login via your Learning Management System|]
 authHttpManager :: Manager
 authHttpManager = error "not implemented"
 
