@@ -4,35 +4,38 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE NamedFieldPuns #-}
+{-# LANGUAGE TemplateHaskell #-}
 
 module Yesod.Auth.LTI13 (
       PlatformInfo(..)
     , Issuer
-    , YesodAuthLTI13Exception(..)
+    , Nonce
     , authLTI13
     , YesodAuthLTI13(..)
-    , Nonce
     ) where
 
 import Yesod.Core.Widget
-import Yesod.Auth (MonadAuthHandler, Route(PluginR), setCredsRedirect, Creds(..), authHttpManager, AuthHandler, AuthPlugin(..), YesodAuth)
+import Yesod.Auth (Route(PluginR), setCredsRedirect, Creds(..), authHttpManager, AuthHandler, AuthPlugin(..), YesodAuth)
 import Web.LTI13 (handleAuthResponse,
         LTI13Exception, initiate, RequestParams, PlatformInfo(..),
         Issuer, SessionStore(..), AuthFlowConfig(..)
         )
 import Data.Text (Text)
+import qualified Data.Text as T
 import qualified Data.Map.Strict as Map
 import Crypto.Random (getRandomBytes)
 import Yesod.Core.Types (TypedContent)
-import Yesod.Core (getUrlRender, getRouteToParent, permissionDenied,
-                   setSession, lookupSession, redirect, deleteSession, lookupSessionBS,
-                   setSessionBS, runRequestBody, getRequest, MonadHandler, notFound)
+import Yesod.Core (permissionDenied, setSession, lookupSession, redirect,
+        deleteSession, lookupSessionBS, setSessionBS, runRequestBody,
+        getRequest, MonadHandler, notFound, getUrlRender, logDebug)
 import qualified Data.ByteString.Base64.URL as B64
 import Web.OIDC.Client.Tokens (IdTokenClaims(..))
 import Yesod.Core (YesodRequest(reqGetParams))
 import Control.Exception.Safe (Exception, throwIO)
 import Control.Monad.IO.Class (MonadIO(liftIO))
 import Web.OIDC.Client (Nonce)
+import Yesod.Core.Handler (getRouteToParent)
+import Yesod.Core (getSession)
 
 data YesodAuthLTI13Exception
     = LTIException Text LTI13Exception
@@ -46,22 +49,21 @@ data YesodAuthLTI13Exception
 instance Exception YesodAuthLTI13Exception
 
 dispatchAuthRequest
-    :: (YesodAuthLTI13 master, MonadAuthHandler master m)
-    => AuthFlowConfig m
-    -> Text
+    :: YesodAuthLTI13 master
+    => Text
     -- ^ Name of the auth provider
     -> Text
     -- ^ Method
     -> [Text]
     -- ^ Path parts
     -> AuthHandler master TypedContent
-dispatchAuthRequest cfg name "GET" ["initiate"] =
-    unifyParams GET  >>= dispatchInitiate name cfg
-dispatchAuthRequest cfg name "POST" ["initiate"] =
-    unifyParams POST >>= dispatchInitiate name cfg
-dispatchAuthRequest cfg name "POST" ["authenticate"] =
-    dispatchAuthenticate name cfg
-dispatchAuthRequest _ _ _ _ = notFound
+dispatchAuthRequest name "GET" ["initiate"] =
+    unifyParams GET  >>= dispatchInitiate name
+dispatchAuthRequest name "POST" ["initiate"] =
+    unifyParams POST >>= dispatchInitiate name
+dispatchAuthRequest name "POST" ["authenticate"] =
+    dispatchAuthenticate name
+dispatchAuthRequest _ _ _ = notFound
 
 -- | HTTP method for 'unifyParams'
 data Method = GET
@@ -87,6 +89,14 @@ prefixSession name datum =
 myIss :: Text -> Text
 myIss = flip prefixSession $ "iss"
 
+-- | Makes the name for the @state@ cookie
+myState :: Text -> Text
+myState = flip prefixSession $ "state"
+
+-- | Makes the name for the @nonce@ cookie
+myNonce :: Text -> Text
+myNonce = flip prefixSession $ "nonce"
+
 mkSessionStore :: MonadHandler m => Text -> SessionStore m
 mkSessionStore name =
     SessionStore
@@ -98,11 +108,12 @@ mkSessionStore name =
     where
         -- we make only url safe stuff to not cause chaos elsewhere
         gen = liftIO $ (B64.encode <$> getRandomBytes 33)
-        sname = prefixSession name "state"
-        nname = prefixSession name "nonce"
+        sname = myState name
+        nname = myNonce name
         sessionSave state nonce = do
             setSessionBS sname state
             setSessionBS nname nonce
+            return ()
         sessionGet = do
             state <- lookupSessionBS sname
             nonce <- lookupSessionBS nname
@@ -111,42 +122,48 @@ mkSessionStore name =
             deleteSession sname
             deleteSession nname
 
+type PluginName = Text
+
 makeCfg
     :: MonadHandler m
-    => Text
+    => PluginName
     -> (Issuer -> m PlatformInfo)
     -> (Nonce -> m Bool)
-    -> m (AuthFlowConfig m)
-makeCfg name pinfo seenNonce = do
-    let url = PluginR name ["authenticate"]
-    tm <- getRouteToParent
-    render <- getUrlRender
-    return AuthFlowConfig
+    -> Text
+    -> AuthFlowConfig m
+makeCfg name pinfo seenNonce callback =
+    AuthFlowConfig
         { getPlatformInfo = pinfo
         , haveSeenNonce = seenNonce
-        , myRedirectUri = render $ tm url
+        , myRedirectUri = callback
         , sessionStore = mkSessionStore name
         }
 
 dispatchInitiate
-    :: (YesodAuthLTI13 master, MonadAuthHandler master m)
-    => Text
+    :: YesodAuthLTI13 master
+    => PluginName
     -- ^ Name of the provider
-    -> AuthFlowConfig m
     -> RequestParams
     -- ^ Request parameters
     -> AuthHandler master TypedContent
-dispatchInitiate name cfg params = do
+dispatchInitiate name params = do
+    -- TODO: this should be refactored into a function but I don't know how
+    let url = PluginR name ["authenticate"]
+    tm <- getRouteToParent
+    render <- getUrlRender
+    let authUrl = render $ tm url
+
+    let cfg = makeCfg name retrievePlatformInfo checkSeenNonce authUrl
     (iss, redir) <- initiate cfg params
     setSession (myIss name) iss
     redirect redir
 
+type State = Text
 
-checkCSRFToken :: MonadHandler m => Text -> m ()
-checkCSRFToken state = do
-    state' <- lookupSession "state"
+checkCSRFToken :: MonadHandler m => State -> Maybe State -> m ()
+checkCSRFToken state state' = do
     -- they do not match or the state is wrong
-    if state' /= Just state then
+    if state' /= Just state then do
         permissionDenied "Bad CSRF token"
     else
         return ()
@@ -156,8 +173,8 @@ checkCSRFToken state = do
 makeUserId :: Issuer -> Text -> Text
 makeUserId iss name = name <> "@@" <> iss
 
-dispatchAuthenticate :: (YesodAuthLTI13 m, MonadAuthHandler m n) => Text -> AuthFlowConfig n -> AuthHandler m TypedContent
-dispatchAuthenticate name cfg = do
+dispatchAuthenticate :: YesodAuthLTI13 m => PluginName -> AuthHandler m TypedContent
+dispatchAuthenticate name = do
     mgr <- authHttpManager
     -- first, find who the issuer was
     -- this is safe, least of which because Yesod has encrypted session cookies
@@ -167,18 +184,22 @@ dispatchAuthenticate name cfg = do
                  maybeIss
     deleteSession $ myIss name
 
+    state' <- lookupSession $ myState name
+
+    -- we don't care about having a callback URL here since we *are* the callback
+    let cfg = makeCfg name retrievePlatformInfo checkSeenNonce undefined
     (params', _) <- runRequestBody
     let params = Map.fromList params'
     (state, tok) <- handleAuthResponse mgr cfg params iss
 
     -- check CSRF token against the state in the request
-    checkCSRFToken state
+    checkCSRFToken state state'
 
     let IdTokenClaims { sub } = tok
         myCreds = Creds {
               credsPlugin = name
             , credsIdent = makeUserId iss sub
-            , credsExtra = []
+            , credsExtra = [("ltiIss", iss), ("ltiSub", sub)]
             -- TODO: we should probably give the user some of the stuff we
             --       parsed from the LTI token, but I am not 100% sure how yet
         }
@@ -203,3 +224,4 @@ authLTI13 = do
     where
         name = "lti13"
         login _ = [whamlet|Login via your Learning Management System|]
+

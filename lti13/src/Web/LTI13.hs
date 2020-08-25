@@ -13,7 +13,6 @@ module Web.LTI13 (
       , LTI13Exception(..)
       , PlatformInfo(..)
       , Issuer
-      , GetPlatformInfo
       , SessionStore(..)
       , AuthFlowConfig(..)
       , RequestParams
@@ -215,13 +214,11 @@ data PlatformInfo = PlatformInfo
 -- | Issuer/@iss@ field
 type Issuer = Text
 
--- | Access some persistent storage of the configured platforms and return the
---   PlatformInfo for a given platform by name
-type GetPlatformInfo m = Issuer -> m PlatformInfo
-
 -- | Object you have to provide defining integration points with your app
 data AuthFlowConfig m = AuthFlowConfig
-    { getPlatformInfo :: GetPlatformInfo m
+    { getPlatformInfo :: Issuer -> m PlatformInfo
+    -- | Access some persistent storage of the configured platforms and return the
+    --   PlatformInfo for a given platform by name
     , haveSeenNonce   :: Nonce -> m Bool
     , myRedirectUri   :: Text
     , sessionStore    :: SessionStore m
@@ -271,7 +268,7 @@ initiate cfg params = do
     res <- liftIO $ mapM (flip lookupOrThrow params) ["iss", "login_hint", "target_link_uri"]
     -- not actually fallible
     let [iss, loginHint, _] = res
-    let messageHint = Map.lookup "lti_mesage_hint" params
+    let messageHint = Map.lookup "lti_message_hint" params
     PlatformInfo
         { platformOidcAuthEndpoint = endpoint
         , platformClientId = clientId

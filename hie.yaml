@@ -18,3 +18,8 @@ cradle:
         cradle:
           cabal:
             component: "lib:yesod-auth-lti13"
+    - path: "./yesod-auth-lti13/example"
+      config:
+        cradle:
+          cabal:
+            component: "exe:yesod-lti13-example"

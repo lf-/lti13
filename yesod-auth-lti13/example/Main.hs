@@ -12,17 +12,16 @@ import Data.ByteString.Lazy (fromStrict, toStrict)
 import qualified Data.Map as M
 import Data.Maybe (fromJust)
 import Data.Text (Text)
-import qualified Data.Text as T
 import qualified Data.Set as Set
 import Data.IORef (atomicModifyIORef', newIORef, IORef)
 import Data.Text.Encoding (decodeUtf8)
 import LoadEnv
 import Network.HTTP.Conduit
 import Network.Wai.Handler.Warp (runEnv)
-import System.Environment (getEnv)
 import Yesod
 import Yesod.Auth
-import Yesod.Auth.LTI13 (Nonce, authLTI13, YesodAuthLTI13(..), PlatformInfo(..))
+import Yesod.Auth.LTI13 (
+    Nonce, authLTI13, YesodAuthLTI13(..), PlatformInfo(..))
 import System.IO.Unsafe (unsafePerformIO)
 
 
@@ -39,8 +38,8 @@ mkYesod "App" [parseRoutes|
 |]
 
 instance Yesod App where
-    -- see https://github.com/thoughtbot/yesod-auth-oauth2/issues/87
     approot = ApprootStatic "http://localhost:3000"
+    shouldLogIO _ _ level = return $ level >= LevelDebug
 
 instance YesodAuth App where
     type AuthId App = Text
@@ -81,26 +80,21 @@ getRootR = do
 
         mCredsIdent = decodeUtf8 <$> M.lookup "credsIdent" sess
         mCredsPlugin = decodeUtf8 <$> M.lookup "credsPlugin" sess
-        mAccessToken = decodeUtf8 <$> M.lookup "accessToken" sess
-        mUserResponse = prettify <$> M.lookup "userResponse" sess
+        mIss = decodeUtf8 <$> M.lookup "ltiIss" sess
+        mSub = decodeUtf8 <$> M.lookup "ltiSub" sess
 
     defaultLayout [whamlet|
-        <h1>Yesod Auth OAuth2 Example
-        <h2>
-            <a href=@{AuthR LoginR}>Log in
-
+        <h1>Yesod Auth LTI1.3 Example
         <h2>Credentials
 
         <h3>Plugin / Ident
         <p>#{show mCredsPlugin} / #{show mCredsIdent}
 
-        <h3>Access Token
-        <p>#{show mAccessToken}
+        <h3>Issuer
+        <p>#{show mIss}
 
-        <h3>User Response
-        <pre>
-            $maybe userResponse <- mUserResponse
-                #{userResponse}
+        <h3>Subject
+        <p>#{show mSub}
     |]
 
 -- This is strictly wrong but I have no idea how to properly get the state into
@@ -115,14 +109,16 @@ instance YesodAuthLTI13 App where
         return seen
 
     -- You should actually put a database here
-    retrievePlatformInfo "a" = return $ PlatformInfo {
-          platformIssuer = "a"
+    retrievePlatformInfo "aaaaa" = return $ PlatformInfo {
+          platformIssuer = "aaaaa"
         , platformDeploymentId = "aaa"
-        , platformClientId = "bbb"
-        , platformOidcAuthEndpoint = "https://ccc.com"
-        , jwksUrl = "https://ddd.com"
+        , platformClientId = "abcde"
+        , platformOidcAuthEndpoint = "https://lti-ri.imsglobal.org/platforms/1255/authorizations/new"
+        , jwksUrl = "https://lti-ri.imsglobal.org/platforms/1255/platform_keys/1248.json"
         }
-    retrievePlatformInfo _ = fail $ "unknown platform"
+    retrievePlatformInfo iss = do
+        $logWarn $ "unknown platform " <> iss
+        fail $ "unknown platform"
 
 mkFoundation :: IO App
 mkFoundation = do
@@ -130,3 +126,6 @@ mkFoundation = do
     appHttpManager <- newManager tlsManagerSettings
     appAuthPlugins <- return $ [ authLTI13 ]
     return App {..}
+
+main :: IO ()
+main = runEnv 3000 =<< toWaiApp =<< mkFoundation
