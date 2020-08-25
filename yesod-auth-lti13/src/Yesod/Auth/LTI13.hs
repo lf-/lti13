@@ -3,35 +3,36 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE NamedFieldPuns #-}
 
 module Yesod.Auth.LTI13 (
-      PlatformInfo
-    , GetPlatformInfo
+      PlatformInfo(..)
     , Issuer
+    , YesodAuthLTI13Exception(..)
     , authLTI13
+    , YesodAuthLTI13(..)
+    , Nonce
     ) where
 
 import Yesod.Core.Widget
-import Yesod.Auth (MonadAuthHandler, AuthHandler, AuthPlugin(..), YesodAuth)
-import Web.LTI13 (handleAuthResponse, 
-        LTI13Exception, initiate, RequestParams, PlatformInfo, GetPlatformInfo,
+import Yesod.Auth (MonadAuthHandler, Route(PluginR), setCredsRedirect, Creds(..), authHttpManager, AuthHandler, AuthPlugin(..), YesodAuth)
+import Web.LTI13 (handleAuthResponse,
+        LTI13Exception, initiate, RequestParams, PlatformInfo(..),
         Issuer, SessionStore(..), AuthFlowConfig(..)
         )
 import Data.Text (Text)
 import qualified Data.Map.Strict as Map
-import Crypto.Random (getRandomBytes, drgNew, DRG(randomBytesGenerate))
+import Crypto.Random (getRandomBytes)
 import Yesod.Core.Types (TypedContent)
-import Yesod.Core (permissionDenied, setSession, lookupSession, redirect,
-        deleteSession, lookupSessionBS, setSessionBS, runRequestBody,
-        getRequest, MonadHandler, notFound)
+import Yesod.Core (getUrlRender, getRouteToParent, permissionDenied,
+                   setSession, lookupSession, redirect, deleteSession, lookupSessionBS,
+                   setSessionBS, runRequestBody, getRequest, MonadHandler, notFound)
 import qualified Data.ByteString.Base64.URL as B64
-import Network.HTTP.Client (Manager)
+import Web.OIDC.Client.Tokens (IdTokenClaims(..))
 import Yesod.Core (YesodRequest(reqGetParams))
-import Control.Exception.Safe (Exception, MonadThrow, throwIO)
+import Control.Exception.Safe (Exception, throwIO)
 import Control.Monad.IO.Class (MonadIO(liftIO))
-import Data.ByteString (ByteString)
-import Control.Monad.Fail (MonadFail)
-import Control.Monad ((>=>))
+import Web.OIDC.Client (Nonce)
 
 data YesodAuthLTI13Exception
     = LTIException Text LTI13Exception
@@ -45,25 +46,22 @@ data YesodAuthLTI13Exception
 instance Exception YesodAuthLTI13Exception
 
 dispatchAuthRequest
-    :: (MonadHandler m)
-    => Text
+    :: (YesodAuthLTI13 master, MonadAuthHandler master m)
+    => AuthFlowConfig m
+    -> Text
     -- ^ Name of the auth provider
-    -> Manager
-    -- ^ HTTP 'Manager' to use for authentication calls
-    -> GetPlatformInfo IO
-    -- ^ Function to get the platform details
     -> Text
     -- ^ Method
     -> [Text]
     -- ^ Path parts
-    -> m b
-dispatchAuthRequest name _ platformInfo "GET" ["initiate"] =
-    unifyParams GET  >>= dispatchInitiate name platformInfo
-dispatchAuthRequest name _ platformInfo "POST" ["initiate"] =
-    unifyParams POST >>= dispatchInitiate name platformInfo
-dispatchAuthRequest name mgr platformInfo "POST" ["authenticate"] =
-    dispatchAuthenticate name mgr platformInfo
-dispatchAuthRequest _ _ _ _ _ = notFound
+    -> AuthHandler master TypedContent
+dispatchAuthRequest cfg name "GET" ["initiate"] =
+    unifyParams GET  >>= dispatchInitiate name cfg
+dispatchAuthRequest cfg name "POST" ["initiate"] =
+    unifyParams POST >>= dispatchInitiate name cfg
+dispatchAuthRequest cfg name "POST" ["authenticate"] =
+    dispatchAuthenticate name cfg
+dispatchAuthRequest _ _ _ _ = notFound
 
 -- | HTTP method for 'unifyParams'
 data Method = GET
@@ -113,27 +111,32 @@ mkSessionStore name =
             deleteSession sname
             deleteSession nname
 
-makeCfg :: MonadHandler m => Text -> GetPlatformInfo IO -> AuthFlowConfig m
-makeCfg name pinfo =
-    AuthFlowConfig
-        { getPlatformInfo = liftIO . pinfo
-        -- TODO: FIX THIS IT IS REALLY BAD
-        , haveSeenNonce = \_ -> return False
-        , myRedirectUri = "http://localhost:3000/auth/authenticate"
+makeCfg
+    :: MonadHandler m
+    => Text
+    -> (Issuer -> m PlatformInfo)
+    -> (Nonce -> m Bool)
+    -> m (AuthFlowConfig m)
+makeCfg name pinfo seenNonce = do
+    let url = PluginR name ["authenticate"]
+    tm <- getRouteToParent
+    render <- getUrlRender
+    return AuthFlowConfig
+        { getPlatformInfo = pinfo
+        , haveSeenNonce = seenNonce
+        , myRedirectUri = render $ tm url
         , sessionStore = mkSessionStore name
         }
 
 dispatchInitiate
-    :: MonadHandler m
+    :: (YesodAuthLTI13 master, MonadAuthHandler master m)
     => Text
     -- ^ Name of the provider
-    -> GetPlatformInfo IO
-    -- ^ Function to get the parameters for a given issuer
+    -> AuthFlowConfig m
     -> RequestParams
     -- ^ Request parameters
-    -> m b
-dispatchInitiate name platformInfo params = do
-    let cfg = makeCfg name platformInfo
+    -> AuthHandler master TypedContent
+dispatchInitiate name cfg params = do
     (iss, redir) <- initiate cfg params
     setSession (myIss name) iss
     redirect redir
@@ -148,8 +151,14 @@ checkCSRFToken state = do
     else
         return ()
 
-dispatchAuthenticate :: (MonadHandler m) => Text -> Manager -> GetPlatformInfo IO -> m b
-dispatchAuthenticate name mgr platformInfo = do
+-- | Makes a user ID that is not an email address (and should thus be safe from
+--   [possible security problem] collisions with email based auth systems)
+makeUserId :: Issuer -> Text -> Text
+makeUserId iss name = name <> "@@" <> iss
+
+dispatchAuthenticate :: (YesodAuthLTI13 m, MonadAuthHandler m n) => Text -> AuthFlowConfig n -> AuthHandler m TypedContent
+dispatchAuthenticate name cfg = do
+    mgr <- authHttpManager
     -- first, find who the issuer was
     -- this is safe, least of which because Yesod has encrypted session cookies
     maybeIss <- lookupSession $ myIss name
@@ -158,7 +167,6 @@ dispatchAuthenticate name mgr platformInfo = do
                  maybeIss
     deleteSession $ myIss name
 
-    let cfg = makeCfg name platformInfo
     (params', _) <- runRequestBody
     let params = Map.fromList params'
     (state, tok) <- handleAuthResponse mgr cfg params iss
@@ -166,14 +174,32 @@ dispatchAuthenticate name mgr platformInfo = do
     -- check CSRF token against the state in the request
     checkCSRFToken state
 
-    notFound
+    let IdTokenClaims { sub } = tok
+        myCreds = Creds {
+              credsPlugin = name
+            , credsIdent = makeUserId iss sub
+            , credsExtra = []
+            -- TODO: we should probably give the user some of the stuff we
+            --       parsed from the LTI token, but I am not 100% sure how yet
+        }
 
-authLTI13 :: YesodAuth m => GetPlatformInfo IO -> AuthPlugin m
-authLTI13 platformInfo =
-    AuthPlugin name (dispatchAuthRequest name authHttpManager platformInfo) login
+    setCredsRedirect myCreds
+
+class (YesodAuth site)
+    => YesodAuthLTI13 site where
+        -- | Check if a nonce has been seen in the last validity period. It is
+        --  expected that nonces given to this function are stored somewhere,
+        --  returning False, then when seen again, True should be returned.
+        --  See the <http://www.imsglobal.org/spec/security/v1p0/#authentication-response-validation
+        --  relevant section of the IMS security specification> for details.
+        checkSeenNonce :: Nonce -> AuthHandler site (Bool)
+
+        -- | Get the configuration for the given platform
+        retrievePlatformInfo :: Issuer -> AuthHandler site (PlatformInfo)
+
+authLTI13 :: YesodAuthLTI13 m => AuthPlugin m
+authLTI13 = do
+    AuthPlugin name (dispatchAuthRequest name) login
     where
         name = "lti13"
         login _ = [whamlet|Login via your Learning Management System|]
-authHttpManager :: Manager
-authHttpManager = error "not implemented"
-
