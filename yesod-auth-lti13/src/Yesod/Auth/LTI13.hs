@@ -21,13 +21,12 @@ import Web.LTI13 (handleAuthResponse,
         Issuer, SessionStore(..), AuthFlowConfig(..)
         )
 import Data.Text (Text)
-import qualified Data.Text as T
 import qualified Data.Map.Strict as Map
 import Crypto.Random (getRandomBytes)
 import Yesod.Core.Types (TypedContent)
 import Yesod.Core (permissionDenied, setSession, lookupSession, redirect,
         deleteSession, lookupSessionBS, setSessionBS, runRequestBody,
-        getRequest, MonadHandler, notFound, getUrlRender, logDebug)
+        getRequest, MonadHandler, notFound, getUrlRender)
 import qualified Data.ByteString.Base64.URL as B64
 import Web.OIDC.Client.Tokens (IdTokenClaims(..))
 import Yesod.Core (YesodRequest(reqGetParams))
@@ -35,7 +34,6 @@ import Control.Exception.Safe (Exception, throwIO)
 import Control.Monad.IO.Class (MonadIO(liftIO))
 import Web.OIDC.Client (Nonce)
 import Yesod.Core.Handler (getRouteToParent)
-import Yesod.Core (getSession)
 
 data YesodAuthLTI13Exception
     = LTIException Text LTI13Exception
