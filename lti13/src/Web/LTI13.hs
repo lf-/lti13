@@ -107,7 +107,7 @@ data UncheckedLtiTokenClaims = UncheckedLtiTokenClaims
 --   validated.
 newtype LtiTokenClaims = LtiTokenClaims UncheckedLtiTokenClaims
 
-limitLength :: (Monad m) => Int -> Text -> m Text
+limitLength :: (MonadFail m) => Int -> Text -> m Text
 limitLength len string
     | (T.length string) <= len
     = return string

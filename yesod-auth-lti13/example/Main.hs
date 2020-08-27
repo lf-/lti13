@@ -118,7 +118,7 @@ instance YesodAuthLTI13 App where
         }
     retrievePlatformInfo iss = do
         $logWarn $ "unknown platform " <> iss
-        fail $ "unknown platform"
+        liftIO $ fail "unknown platform"
 
 mkFoundation :: IO App
 mkFoundation = do
