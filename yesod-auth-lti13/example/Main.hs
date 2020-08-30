@@ -5,23 +5,21 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE LambdaCase #-}
 
-import Data.Aeson
-import Data.Aeson.Encode.Pretty
-import Data.ByteString.Lazy (fromStrict, toStrict)
+import qualified Data.ByteString as BS
 import qualified Data.Map as M
-import Data.Maybe (fromJust)
 import Data.Text (Text)
+import qualified Data.Text as T
 import qualified Data.Set as Set
-import Data.IORef (atomicModifyIORef', newIORef, IORef)
+import Data.IORef (readIORef, atomicModifyIORef', newIORef, IORef)
 import Data.Text.Encoding (decodeUtf8)
 import LoadEnv
 import Network.HTTP.Conduit
 import Network.Wai.Handler.Warp (runEnv)
 import Yesod
 import Yesod.Auth
-import Yesod.Auth.LTI13 (
-    Nonce, authLTI13, YesodAuthLTI13(..), PlatformInfo(..))
+import Yesod.Auth.LTI13
 import System.IO.Unsafe (unsafePerformIO)
 
 
@@ -70,18 +68,11 @@ getRootR = do
     sess <- getSession
 
     let
-        prettify
-            = decodeUtf8
-            . toStrict
-            . encodePretty
-            . fromJust
-            . decode @Value
-            . fromStrict
-
         mCredsIdent = decodeUtf8 <$> M.lookup "credsIdent" sess
         mCredsPlugin = decodeUtf8 <$> M.lookup "credsPlugin" sess
-        mIss = decodeUtf8 <$> M.lookup "ltiIss" sess
-        mSub = decodeUtf8 <$> M.lookup "ltiSub" sess
+        mIss = getLtiIss sess
+        mSub = getLtiSub sess
+        mTok = getLtiToken sess
 
     defaultLayout [whamlet|
         <h1>Yesod Auth LTI1.3 Example
@@ -95,12 +86,21 @@ getRootR = do
 
         <h3>Subject
         <p>#{show mSub}
+
+        <h3>Token info
+        <p>#{show mTok}
+
+        <h3>The entire session
+        <p>#{show $ M.toList sess}
     |]
 
 -- This is strictly wrong but I have no idea how to properly get the state into
 -- the `instance YesodAuthLTI13 App` if I put it in the App. PRs welcome.
 seenNonces :: IORef SeenNonces
 seenNonces = unsafePerformIO $ newIORef Set.empty
+
+jwks :: IORef (Maybe BS.ByteString)
+jwks = unsafePerformIO $ newIORef Nothing
 
 instance YesodAuthLTI13 App where
     checkSeenNonce nonce = do
@@ -109,16 +109,24 @@ instance YesodAuthLTI13 App where
         return seen
 
     -- You should actually put a database here
-    retrievePlatformInfo "aaaaa" = return $ PlatformInfo {
+    retrievePlatformInfo ("aaaaa", Just "abcde") = return $ PlatformInfo {
           platformIssuer = "aaaaa"
-        , platformDeploymentId = "aaa"
         , platformClientId = "abcde"
         , platformOidcAuthEndpoint = "https://lti-ri.imsglobal.org/platforms/1255/authorizations/new"
         , jwksUrl = "https://lti-ri.imsglobal.org/platforms/1255/platform_keys/1248.json"
         }
-    retrievePlatformInfo iss = do
-        $logWarn $ "unknown platform " <> iss
+    retrievePlatformInfo (iss, cid) = do
+        $logWarn $ "unknown platform " <> iss <> " with client id " <> (T.pack $ show cid)
         liftIO $ fail "unknown platform"
+
+    retrieveOrInsertJwks new = do
+        -- possibly not thread safe. Also you should actually persist this.
+        cur <- liftIO $ readIORef jwks
+        makeIt <- liftIO $ maybe new pure cur
+        liftIO $ atomicModifyIORef' jwks
+            (\case
+                Nothing -> (Just makeIt, makeIt)
+                Just j -> (Just j, j))
 
 mkFoundation :: IO App
 mkFoundation = do

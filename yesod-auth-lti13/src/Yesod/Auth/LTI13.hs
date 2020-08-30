@@ -6,27 +6,44 @@
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE TemplateHaskell #-}
 
+
+-- | A Yesod authentication module for LTI 1.3
+--   See @example/Main.hs@ for a sample implementation.
+--
+--   Configuration:
+--
+--       * Login initiation URL: http://localhost:3000/auth/page/lti13/initiate
+--
+--       * JWKs URL: http://localhost:3000/auth/page/lti13/jwks
+--
+--       * Tool link URL: http://localhost:3000
 module Yesod.Auth.LTI13 (
       PlatformInfo(..)
     , Issuer
+    , ClientId
     , Nonce
     , authLTI13
     , YesodAuthLTI13(..)
+    , getLtiIss
+    , getLtiSub
+    , getLtiToken
+    , LtiTokenClaims(..)
+    , UncheckedLtiTokenClaims(..)
+    , ContextClaim(..)
+    , Role(..)
     ) where
 
 import Yesod.Core.Widget
 import Yesod.Auth (Route(PluginR), setCredsRedirect, Creds(..), authHttpManager, AuthHandler, AuthPlugin(..), YesodAuth)
-import Web.LTI13 (handleAuthResponse,
-        LTI13Exception, initiate, RequestParams, PlatformInfo(..),
-        Issuer, SessionStore(..), AuthFlowConfig(..)
-        )
+import Web.LTI13
+import qualified Data.Aeson as A
 import Data.Text (Text)
 import qualified Data.Map.Strict as Map
 import Crypto.Random (getRandomBytes)
 import Yesod.Core.Types (TypedContent)
-import Yesod.Core (permissionDenied, setSession, lookupSession, redirect,
+import Yesod.Core (toTypedContent, permissionDenied, setSession, lookupSession, redirect,
         deleteSession, lookupSessionBS, setSessionBS, runRequestBody,
-        getRequest, MonadHandler, notFound, getUrlRender)
+        getRequest, MonadHandler, SessionMap, notFound, getUrlRender)
 import qualified Data.ByteString.Base64.URL as B64
 import Web.OIDC.Client.Tokens (IdTokenClaims(..))
 import Yesod.Core (YesodRequest(reqGetParams))
@@ -34,6 +51,15 @@ import Control.Exception.Safe (Exception, throwIO)
 import Control.Monad.IO.Class (MonadIO(liftIO))
 import Web.OIDC.Client (Nonce)
 import Yesod.Core.Handler (getRouteToParent)
+import qualified Data.Text.Encoding as E
+import qualified Data.ByteString.Lazy as LBS
+import qualified Data.ByteString as BS
+import Jose.Jwk (JwkSet(..), Jwk, generateRsaKeyPair, KeyUse(Sig), rsaPrivToPub)
+import Data.Time (getCurrentTime)
+import Jose.Jwt (KeyId(UTCKeyId))
+import Jose.Jwa (Alg(Signed), JwsAlg(RS256))
+import qualified Data.Text as T
+import Yesod.Core (logDebug)
 
 data YesodAuthLTI13Exception
     = LTIException Text LTI13Exception
@@ -42,13 +68,15 @@ data YesodAuthLTI13Exception
     | BadRequest Text Text
     -- ^ Issue with the request
     --   Plugin name and an error message
+    | CorruptJwks Text Text
+    -- ^ The jwks stored in the database are corrupt. Wat.
     deriving (Show)
 
 instance Exception YesodAuthLTI13Exception
 
 dispatchAuthRequest
     :: YesodAuthLTI13 master
-    => Text
+    => PluginName
     -- ^ Name of the auth provider
     -> Text
     -- ^ Method
@@ -61,12 +89,15 @@ dispatchAuthRequest name "POST" ["initiate"] =
     unifyParams POST >>= dispatchInitiate name
 dispatchAuthRequest name "POST" ["authenticate"] =
     dispatchAuthenticate name
+dispatchAuthRequest name "GET" ["jwks"] =
+    dispatchJwks name
 dispatchAuthRequest _ _ _ = notFound
 
--- | HTTP method for 'unifyParams'
+-- | HTTP method for @unifyParams@
 data Method = GET
             | POST
 
+-- | Turns parameters from their respective request type to a simple map.
 unifyParams
     :: MonadHandler m
     => Method
@@ -82,6 +113,10 @@ unifyParams POST = do
 prefixSession :: Text -> Text -> Text
 prefixSession name datum =
     "_lti13_" <> name <> "_" <> datum
+
+-- | Makes the name for the @clientId@ cookie
+myCid :: Text -> Text
+myCid = flip prefixSession $ "clientId"
 
 -- | Makes the name for the @iss@ cookie
 myIss :: Text -> Text
@@ -125,7 +160,7 @@ type PluginName = Text
 makeCfg
     :: MonadHandler m
     => PluginName
-    -> (Issuer -> m PlatformInfo)
+    -> ((Issuer, Maybe ClientId) -> m PlatformInfo)
     -> (Nonce -> m Bool)
     -> Text
     -> AuthFlowConfig m
@@ -136,6 +171,27 @@ makeCfg name pinfo seenNonce callback =
         , myRedirectUri = callback
         , sessionStore = mkSessionStore name
         }
+
+createNewJwk :: IO Jwk
+createNewJwk = do
+    kid <- UTCKeyId <$> getCurrentTime
+    let use = Sig
+        alg = Signed RS256
+    (_, priv) <- generateRsaKeyPair 256 kid use $ Just alg
+    return priv
+
+dispatchJwks
+    :: YesodAuthLTI13 master
+    => PluginName
+    -> AuthHandler master TypedContent
+dispatchJwks name = do
+    jwks <- retrieveOrInsertJwks makeJwks
+    JwkSet privs <- maybe (liftIO $ throwIO $ CorruptJwks name "json decode failed")
+                    pure (A.decodeStrict jwks)
+    let pubs = JwkSet $ map rsaPrivToPub privs
+    return $ toTypedContent $ A.toJSON pubs
+    where makeJwks = (LBS.toStrict . A.encode) <$> makeJwkSet
+          makeJwkSet = fmap (\jwk -> JwkSet {keys = [jwk]}) createNewJwk
 
 dispatchInitiate
     :: YesodAuthLTI13 master
@@ -152,8 +208,9 @@ dispatchInitiate name params = do
     let authUrl = render $ tm url
 
     let cfg = makeCfg name retrievePlatformInfo checkSeenNonce authUrl
-    (iss, redir) <- initiate cfg params
+    (iss, cid, redir) <- initiate cfg params
     setSession (myIss name) iss
+    setSession (myCid name) cid
     redirect redir
 
 type State = Text
@@ -180,30 +237,56 @@ dispatchAuthenticate name = do
     iss <- maybe (liftIO $ throwIO $ BadRequest name "missing `iss` cookie")
                  pure
                  maybeIss
+    cid <- lookupSession $ myCid name
     deleteSession $ myIss name
+    deleteSession $ myCid name
 
     state' <- lookupSession $ myState name
+
+    pinfo <- retrievePlatformInfo (iss, cid)
 
     -- we don't care about having a callback URL here since we *are* the callback
     let cfg = makeCfg name retrievePlatformInfo checkSeenNonce undefined
     (params', _) <- runRequestBody
     let params = Map.fromList params'
-    (state, tok) <- handleAuthResponse mgr cfg params iss
+    (state, tok) <- handleAuthResponse mgr cfg params pinfo
 
     -- check CSRF token against the state in the request
     checkCSRFToken state state'
+    $logDebug $ T.pack $ show tok
+
+    let LtiTokenClaims ltiClaims = otherClaims tok
+        ltiClaimsJson = E.decodeUtf8 $ LBS.toStrict $ A.encode ltiClaims
 
     let IdTokenClaims { sub } = tok
         myCreds = Creds {
               credsPlugin = name
             , credsIdent = makeUserId iss sub
-            , credsExtra = [("ltiIss", iss), ("ltiSub", sub)]
-            -- TODO: we should probably give the user some of the stuff we
-            --       parsed from the LTI token, but I am not 100% sure how yet
+            , credsExtra = [("ltiIss", iss), ("ltiSub", sub), ("ltiToken", ltiClaimsJson)]
         }
 
     setCredsRedirect myCreds
 
+-- | Gets the @iss@ for the given sesssion
+getLtiIss :: SessionMap -> Maybe Issuer
+getLtiIss sess =
+    E.decodeUtf8 <$> Map.lookup "ltiIss" sess
+
+-- | Gets the @sub@ for the given session
+getLtiSub :: SessionMap -> Maybe Issuer
+getLtiSub sess =
+    E.decodeUtf8 <$> Map.lookup "ltiSub" sess
+
+-- | Gets and decodes the extra token claims with the full LTI launch
+--   information from a session
+--
+--   Signature slightly inaccurate: the claims have been checked at this stage.
+getLtiToken :: SessionMap -> Maybe UncheckedLtiTokenClaims
+getLtiToken sess =
+    (Map.lookup "ltiToken" sess)
+    >>= A.decodeStrict
+
+-- | Callbacks into your site for LTI 1.3
 class (YesodAuth site)
     => YesodAuthLTI13 site where
         -- | Check if a nonce has been seen in the last validity period. It is
@@ -213,9 +296,24 @@ class (YesodAuth site)
         --  relevant section of the IMS security specification> for details.
         checkSeenNonce :: Nonce -> AuthHandler site (Bool)
 
-        -- | Get the configuration for the given platform
-        retrievePlatformInfo :: Issuer -> AuthHandler site (PlatformInfo)
+        -- | Get the configuration for the given platform.
+        --
+        --   It is possible that the relation between Issuer and ClientId is 1
+        --   to n rather than 1 to 1, for instance in the case of cloud hosted
+        --   Canvas. You *must* therefore key your 'PlatformInfo' retrieval
+        --   with the pair of both and throw an error if there are multiple
+        --   'ClientId' for the given 'Issuer' and the 'ClientId' is 'Nothing'.
+        retrievePlatformInfo :: (Issuer, Maybe ClientId) -> AuthHandler site (PlatformInfo)
 
+        -- | Retrieve JWKs list from the database or other store. If not
+        --   present, please create a new one by evaluating the given 'IO', store
+        --   it, and return it.
+        retrieveOrInsertJwks
+            :: (IO BS.ByteString)
+            -- ^ an 'IO' which, if evaluated, will make a new 'Jwk' set
+            -> AuthHandler site (BS.ByteString)
+
+-- | Auth plugin. Add this to @appAuthPlugins@ to enable this plugin.
 authLTI13 :: YesodAuthLTI13 m => AuthPlugin m
 authLTI13 = do
     AuthPlugin name (dispatchAuthRequest name) login

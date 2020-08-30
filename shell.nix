@@ -11,6 +11,7 @@ nixpkgs.haskell.packages."${ghcVer}".shellFor {
     cabal-install
     Cabal
     brittany
+    haskell-language-server
   ] ++ (with nixpkgs; [
     cabal2nix
   ]);

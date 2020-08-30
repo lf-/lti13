@@ -13,6 +13,7 @@ module Web.LTI13 (
       , LTI13Exception(..)
       , PlatformInfo(..)
       , Issuer
+      , ClientId
       , SessionStore(..)
       , AuthFlowConfig(..)
       , RequestParams
@@ -29,7 +30,9 @@ import qualified Jose.Jwk as Jwk
 import Control.Monad (when, (>=>))
 import Control.Exception.Safe (MonadCatch, catch, throwM, Typeable, Exception, MonadThrow, throw)
 import Control.Monad.IO.Class (liftIO, MonadIO)
-import Data.Aeson (eitherDecode, FromJSON (parseJSON), Object, withObject, withText, (.:), (.:?))
+import Data.Aeson (eitherDecode, FromJSON (parseJSON), ToJSON(toJSON, toEncoding), Object,
+                   object, pairs, withObject, withText, (.:), (.:?), (.=))
+import qualified Data.Aeson as A
 import Data.Aeson.Types (Parser)
 import Data.Text (Text)
 import qualified Network.HTTP.Types.URI as URI
@@ -72,8 +75,19 @@ roleFromString "http://purl.imsglobal.org/vocab/lis/v2/membership#Mentor"
     = Mentor
 roleFromString s = Other s
 
+roleToString :: Role -> Text
+roleToString Administrator = "http://purl.imsglobal.org/vocab/lis/v2/membership#Administrator"
+roleToString ContentDeveloper = "http://purl.imsglobal.org/vocab/lis/v2/membership#ContentDeveloper"
+roleToString Instructor = "http://purl.imsglobal.org/vocab/lis/v2/membership#Instructor"
+roleToString Learner = "http://purl.imsglobal.org/vocab/lis/v2/membership#Learner"
+roleToString Mentor = "http://purl.imsglobal.org/vocab/lis/v2/membership#Mentor"
+roleToString (Other s) = s
+
 instance FromJSON Role where
     parseJSON = withText "Role" $ return . roleFromString
+
+instance ToJSON Role where
+    toJSON = A.String . roleToString
 
 -- | <http://www.imsglobal.org/spec/lti/v1p3/#context-claim LTI spec § 5.4.1> context claim
 data ContextClaim = ContextClaim
@@ -89,6 +103,20 @@ instance FromJSON ContextClaim where
             <$> (v .: "id" >>= limitLength 255)
             <*> v .:? "label"
             <*> v .:? "title"
+
+instance ToJSON ContextClaim where
+    toJSON (ContextClaim {contextId, contextLabel, contextTitle}) =
+        object [
+            "id" .= contextId
+          , "label" .= contextLabel
+          , "title" .= contextTitle
+          ]
+    toEncoding (ContextClaim {contextId, contextLabel, contextTitle}) =
+        pairs (
+            "id" .= contextId <>
+            "label" .= contextLabel <>
+            "title" .= contextTitle
+        )
 
 -- | LTI specific claims on a token. You should not accept this type, and
 --   instead prefer the @newtype@ 'LtiTokenClaims' which has had checking
@@ -106,6 +134,7 @@ data UncheckedLtiTokenClaims = UncheckedLtiTokenClaims
 -- | An object representing in the type system a token whose claims have been
 --   validated.
 newtype LtiTokenClaims = LtiTokenClaims UncheckedLtiTokenClaims
+    deriving (Show)
 
 limitLength :: (MonadFail m) => Int -> Text -> m Text
 limitLength len string
@@ -137,8 +166,37 @@ instance FromJSON UncheckedLtiTokenClaims where
             <*> v .:? "email"
             <*> v .:? claimContext
 
+instance ToJSON UncheckedLtiTokenClaims where
+    toJSON (UncheckedLtiTokenClaims {
+              messageType, ltiVersion, deploymentId
+            , targetLinkUri, roles, email, context}) =
+        object [
+              claimMessageType .= messageType
+            , claimVersion .= ltiVersion
+            , claimDeploymentId .= deploymentId
+            , claimTargetLinkUri .= targetLinkUri
+            , claimRoles .= roles
+            , "email" .= email
+            , claimContext .= context
+          ]
+    toEncoding (UncheckedLtiTokenClaims {
+              messageType, ltiVersion, deploymentId
+            , targetLinkUri, roles, email, context}) =
+        pairs (
+               claimMessageType .= messageType
+            <> claimVersion .= ltiVersion
+            <> claimDeploymentId .= deploymentId
+            <> claimTargetLinkUri .= targetLinkUri
+            <> claimRoles .= roles
+            <> "email" .= email
+            <> claimContext .= context
+          )
+
 -- | A direct implementation of <http://www.imsglobal.org/spec/security/v1p0/#authentication-response-validation Security § 5.1.3>
-validateLtiToken :: PlatformInfo -> IdTokenClaims UncheckedLtiTokenClaims -> Either Text (IdTokenClaims LtiTokenClaims)
+validateLtiToken
+    :: PlatformInfo
+    -> IdTokenClaims UncheckedLtiTokenClaims
+    -> Either Text (IdTokenClaims LtiTokenClaims)
 validateLtiToken pinfo claims =
     valid .
         (issuerMatches
@@ -195,15 +253,16 @@ data LTI13Exception
     deriving (Show, Typeable)
 instance Exception LTI13Exception
 
+-- | @client_id@, one or more per platform; <https://www.imsglobal.org/spec/lti/v1p3/#tool-deployment LTI spec § 3.1.3>
+type ClientId = Text
+
 -- | Preregistered information about a learning platform
 data PlatformInfo = PlatformInfo
     {
-    -- |Issuer value
+    -- | Issuer value
       platformIssuer :: Issuer
-    -- | @deployment_id@ <https://www.imsglobal.org/spec/lti/v1p3/#tool-deployment LTI spec § 3.1.3>
-    , platformDeploymentId :: Text
-    -- | @client_id@, one or more per platform; <https://www.imsglobal.org/spec/lti/v1p3/#tool-deployment LTI spec § 3.1.3>
-    , platformClientId :: Text
+    -- | @client_id@
+    , platformClientId :: ClientId
     -- | URL the client is redirected to for <http://www.imsglobal.org/spec/security/v1p0/#step-3-authentication-response auth stage 2>.
     --   See also <http://www.imsglobal.org/spec/security/v1p0/#openid_connect_launch_flow Security spec § 5.1.1>
     , platformOidcAuthEndpoint :: Text
@@ -216,12 +275,12 @@ type Issuer = Text
 
 -- | Object you have to provide defining integration points with your app
 data AuthFlowConfig m = AuthFlowConfig
-    { getPlatformInfo :: Issuer -> m PlatformInfo
-    -- | Access some persistent storage of the configured platforms and return the
+    { getPlatformInfo       :: (Issuer, Maybe ClientId) -> m PlatformInfo
+    -- ^ Access some persistent storage of the configured platforms and return the
     --   PlatformInfo for a given platform by name
-    , haveSeenNonce   :: Nonce -> m Bool
-    , myRedirectUri   :: Text
-    , sessionStore    :: SessionStore m
+    , haveSeenNonce         :: Nonce -> m Bool
+    , myRedirectUri         :: Text
+    , sessionStore          :: SessionStore m
     -- ^ Note that as in the example for haskell-oidc-client, this is intended to
     --   be partially parameterized already with some separate cookie you give
     --   the browser. You should also store the @iss@ in your actual implementation.
@@ -262,17 +321,24 @@ type RequestParams = Map.Map Text Text
 --   upon the § 5.1.1.1 request coming in
 --
 --   Returns @(Issuer, RedirectURL)@.
-initiate :: (MonadIO m) => AuthFlowConfig m -> RequestParams -> m (Issuer, Text)
+initiate :: (MonadIO m) => AuthFlowConfig m -> RequestParams -> m (Issuer, ClientId, Text)
 initiate cfg params = do
     -- we don't care about target link uri since we only support one endpoint
     res <- liftIO $ mapM (flip lookupOrThrow params) ["iss", "login_hint", "target_link_uri"]
     -- not actually fallible
     let [iss, loginHint, _] = res
     let messageHint = Map.lookup "lti_message_hint" params
+    -- "This allows for a platform to support multiple registrations from a
+    -- single issuer, without relying on the initiate_login_uri as a key."
+    --
+    -- Canvas puts the same issuer on all their messages (wat)
+    -- (https://community.canvaslms.com/thread/36682-lti13-how-to-identify-clientid-and-deploymentid-on-launch)
+    -- so we need to be able to distinguish these. Our client code must
+    -- therefore key its platform info store by @(Issuer, Maybe ClientId)@
+    let gotCid = Map.lookup "client_id" params
     PlatformInfo
         { platformOidcAuthEndpoint = endpoint
-        , platformClientId = clientId
-        } <- (getPlatformInfo cfg) iss
+        , platformClientId = clientId } <- (getPlatformInfo cfg) (iss, gotCid)
 
     let ss = sessionStore cfg
     nonce <- sessionStoreGenerate ss
@@ -290,7 +356,7 @@ initiate cfg params = do
                 , ("nonce", nonce)
                 , ("prompt", "none")
                 ] ++ maybe [] (\mh -> [("lti_message_hint", encodeUtf8 mh)]) messageHint
-    return $ (iss, endpoint <> (decodeUtf8 . URI.renderQuery True) query)
+    return $ (iss, clientId, endpoint <> (decodeUtf8 . URI.renderQuery True) query)
 
 -- | Makes a fake OIDC object with the bare minimum attributes to hand to
 --   verification library functions
@@ -328,13 +394,13 @@ handleAuthResponse :: (MonadIO m)
     => Manager
     -> AuthFlowConfig m
     -> RequestParams
-    -> Issuer
+    -> PlatformInfo
     -> m (Text, IdTokenClaims LtiTokenClaims)
-handleAuthResponse mgr cfg params iss = do
+handleAuthResponse mgr cfg params pinfo = do
     params' <- liftIO $ mapM (flip lookupOrThrow params) ["state", "id_token"]
     let [state, idToken] = params'
 
-    pinfo@PlatformInfo { jwksUrl } <- getPlatformInfo cfg iss
+    let PlatformInfo { jwksUrl } = pinfo
     jwkSet <- liftIO $ getJwkSet mgr jwksUrl
 
     let ss = sessionStore cfg

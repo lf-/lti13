@@ -39,6 +39,8 @@ library
                        , aeson-pretty                      >= 0.8.8 && < 0.9
                        , load-env                          >= 0.2.1 && < 0.3
                        , yesod                             >= 1.6.1 && < 1.7
+                       , jose-jwt                          >= 0.8.0 && < 0.9.0
+                       , time                              >= 1.0.0 && < 1.11
     -- hs-source-dirs:
     default-language:    Haskell2010
 
