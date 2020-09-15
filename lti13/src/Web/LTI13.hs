@@ -283,7 +283,8 @@ data AuthFlowConfig m = AuthFlowConfig
     , sessionStore          :: SessionStore m
     -- ^ Note that as in the example for haskell-oidc-client, this is intended to
     --   be partially parameterized already with some separate cookie you give
-    --   the browser. You should also store the @iss@ in your actual implementation.
+    --   the browser. You should also store the @iss@ from the 'initiate' stage
+    --   in the session somewhere for the 'handleAuthResponse' stage.
     }
 
 rethrow :: (MonadCatch m) => HttpException -> m a

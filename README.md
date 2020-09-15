@@ -1,11 +1,8 @@
-# Minimal LTI 1.3 implementation for Haskell
+# lti13
 
-This is a *very* minimal and experimental implementation of LTI 1.3
-authentication for Haskell.
-
-# Warning
-
-This project has not been tested yet. Using it right now is probably foolish.
+This is a minimal implementation of LTI 1.3 authentication for Haskell. It
+supports performing LTI launches and getting most of the interesting fields of
+the [resource link request](http://www.imsglobal.org/spec/lti/v1p3/#examplelinkrequest).
 
 ## Development setup
 
@@ -15,6 +12,8 @@ a `nix-shell` shell start with `[nix-shell]$`.
 This project provides Nix files for your convenience in creating a working
 development environment. If you would like to install Nix, [there is a guide on
 the official documentation](https://nixos.org/nix/manual/#ch-installing-binary).
+
+We provide haskell-language-server in our `nix-shell`s.
 
 ```
 $ nix-shell
@@ -38,3 +37,10 @@ $ nix-shell
   not a big problem.
 * We should probably provide a method to decode the JWK blob our users are
   expected to store and/or support calling back to the Provider API ourselves.
+
+## Project Information
+
+This codebase is licensed under the GNU LGPLv3 license.
+
+This project has adopted a [Code of Conduct](CODE_OF_CONDUCT.md) based on the
+Contributor Covenant.

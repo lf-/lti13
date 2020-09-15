@@ -59,8 +59,6 @@ import Jose.Jwk (JwkSet(..), Jwk(..), generateRsaKeyPair, KeyUse(Sig))
 import Data.Time (getCurrentTime)
 import Jose.Jwt (KeyId(UTCKeyId))
 import Jose.Jwa (Alg(Signed), JwsAlg(RS256))
-import qualified Data.Text as T
-import Yesod.Core (logDebug)
 
 data YesodAuthLTI13Exception
     = LTIException Text LTI13Exception
@@ -240,7 +238,7 @@ dispatchAuthenticate name = do
     -- first, find who the issuer was
     -- this is safe, least of which because Yesod has encrypted session cookies
     maybeIss <- lookupSession $ myIss name
-    iss <- maybe (liftIO $ throwIO $ BadRequest name "missing `iss` cookie")
+    iss <- maybe (liftIO . throwIO $ BadRequest name "missing `iss` cookie")
                  pure
                  maybeIss
     cid <- lookupSession $ myCid name
@@ -259,7 +257,6 @@ dispatchAuthenticate name = do
 
     -- check CSRF token against the state in the request
     checkCSRFToken state state'
-    $logDebug $ T.pack $ show tok
 
     let LtiTokenClaims ltiClaims = otherClaims tok
         ltiClaimsJson = E.decodeUtf8 $ LBS.toStrict $ A.encode ltiClaims
