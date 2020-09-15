@@ -40,6 +40,7 @@ import qualified Data.Aeson as A
 import Data.Text (Text)
 import qualified Data.Map.Strict as Map
 import Crypto.Random (getRandomBytes)
+import qualified Crypto.PubKey.RSA as RSA
 import Yesod.Core.Types (TypedContent)
 import Yesod.Core (toTypedContent, permissionDenied, setSession, lookupSession, redirect,
         deleteSession, lookupSessionBS, setSessionBS, runRequestBody,
@@ -54,7 +55,7 @@ import Yesod.Core.Handler (getRouteToParent)
 import qualified Data.Text.Encoding as E
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.ByteString as BS
-import Jose.Jwk (JwkSet(..), Jwk, generateRsaKeyPair, KeyUse(Sig), rsaPrivToPub)
+import Jose.Jwk (JwkSet(..), Jwk(..), generateRsaKeyPair, KeyUse(Sig))
 import Data.Time (getCurrentTime)
 import Jose.Jwt (KeyId(UTCKeyId))
 import Jose.Jwa (Alg(Signed), JwsAlg(RS256))
@@ -192,6 +193,11 @@ dispatchJwks name = do
     return $ toTypedContent $ A.toJSON pubs
     where makeJwks = (LBS.toStrict . A.encode) <$> makeJwkSet
           makeJwkSet = fmap (\jwk -> JwkSet {keys = [jwk]}) createNewJwk
+
+rsaPrivToPub :: Jwk -> Jwk
+rsaPrivToPub (RsaPrivateJwk privKey mId mUse mAlg) =
+    RsaPublicJwk (RSA.private_pub privKey) mId mUse mAlg
+rsaPrivToPub _ = error "rsaPrivToPub called on a Jwk that's not a RsaPrivateJwk"
 
 dispatchInitiate
     :: YesodAuthLTI13 master
