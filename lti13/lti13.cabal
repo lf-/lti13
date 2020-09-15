@@ -1,7 +1,7 @@
 cabal-version:       >=1.10
 
 name:                lti13
-version:             0.1.0.0
+version:             0.1.1.0
 -- synopsis:
 description:         A library implementing types for LTI 1.3.
 -- bug-reports:
