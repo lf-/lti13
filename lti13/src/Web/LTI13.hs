@@ -28,6 +28,7 @@ import Web.OIDC.Client.Types (Nonce, SessionStore(..))
 import Jose.Jwa (JwsAlg(RS256))
 import qualified Jose.Jwk as Jwk
 import Control.Monad (when, (>=>))
+import qualified Control.Monad.Fail as Fail
 import Control.Exception.Safe (MonadCatch, catch, throwM, Typeable, Exception, MonadThrow, throw)
 import Control.Monad.IO.Class (liftIO, MonadIO)
 import Data.Aeson (eitherDecode, FromJSON (parseJSON), ToJSON(toJSON, toEncoding), Object,
@@ -136,7 +137,7 @@ data UncheckedLtiTokenClaims = UncheckedLtiTokenClaims
 newtype LtiTokenClaims = LtiTokenClaims UncheckedLtiTokenClaims
     deriving (Show)
 
-limitLength :: (MonadFail m) => Int -> Text -> m Text
+limitLength :: (Fail.MonadFail m) => Int -> Text -> m Text
 limitLength len string
     | (T.length string) <= len
     = return string

@@ -12,3 +12,7 @@
 ## 0.1.2.0 -- 2020-09-16
 
 * Add `authLTI13WithWidget`
+
+## 0.1.2.1 -- 2020-09-16
+
+* No changes
