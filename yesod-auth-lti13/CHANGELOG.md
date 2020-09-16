@@ -8,3 +8,7 @@
 
 * Handle Canvas Cloud setting all their issuers the same.
 * Remove dependency on changed jose-jwt. Thanks @tekul for the help on this.
+
+## 0.1.2.0 -- 2020-09-16
+
+* Add `authLTI13WithWidget`
