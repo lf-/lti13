@@ -44,6 +44,9 @@ instance YesodAuth App where
     loginDest _ = RootR
     logoutDest _ = RootR
 
+    onLogout = do
+        $logDebug . T.pack . show =<< getSession
+
     -- Disable any attempt to read persisted authenticated state
     maybeAuthId = return Nothing
 
@@ -77,6 +80,10 @@ getRootR = do
     defaultLayout [whamlet|
         <h1>Yesod Auth LTI1.3 Example
         <h2>Credentials
+
+        <p><a href=@{AuthR LoginR}>Login page</a>
+        <!-- XXX: logout doesn't work. It works in real apps, I promise! -->
+        <!--<p><a href=@{AuthR LogoutR}>Logout</a>-->
 
         <h3>Plugin / Ident
         <p>#{show mCredsPlugin} / #{show mCredsIdent}
@@ -132,8 +139,13 @@ mkFoundation :: IO App
 mkFoundation = do
     loadEnv
     appHttpManager <- newManager tlsManagerSettings
-    appAuthPlugins <- return $ [ authLTI13 ]
+    appAuthPlugins <- return $ [ authLTI13WithWidget login ]
     return App {..}
+    where
+        login _ = [whamlet|
+            <p><a href="https://lti-ri.imsglobal.org/platforms/1255/resource_links">
+                Start your login via the LTI reference implementation</a>
+        |]
 
 main :: IO ()
 main = runEnv 3000 =<< toWaiApp =<< mkFoundation

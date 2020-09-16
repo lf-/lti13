@@ -23,6 +23,7 @@ module Yesod.Auth.LTI13 (
     , ClientId
     , Nonce
     , authLTI13
+    , authLTI13WithWidget
     , YesodAuthLTI13(..)
     , getLtiIss
     , getLtiSub
@@ -34,7 +35,7 @@ module Yesod.Auth.LTI13 (
     ) where
 
 import Yesod.Core.Widget
-import Yesod.Auth (Route(PluginR), setCredsRedirect, Creds(..), authHttpManager, AuthHandler, AuthPlugin(..), YesodAuth)
+import Yesod.Auth (Auth, Route(PluginR), setCredsRedirect, Creds(..), authHttpManager, AuthHandler, AuthPlugin(..), YesodAuth)
 import Web.LTI13
 import qualified Data.Aeson as A
 import Data.Text (Text)
@@ -318,9 +319,14 @@ class (YesodAuth site)
 
 -- | Auth plugin. Add this to @appAuthPlugins@ to enable this plugin.
 authLTI13 :: YesodAuthLTI13 m => AuthPlugin m
-authLTI13 = do
+authLTI13 = authLTI13WithWidget login
+    where
+        login _ = [whamlet|<p>Go to your Learning Management System to log in via LTI 1.3|]
+
+-- | Auth plugin. The same as 'authLTI13' but you can provide your own template
+--   for the login hint page.
+authLTI13WithWidget :: YesodAuthLTI13 m => ((Route Auth -> Route m) -> WidgetFor m ()) -> AuthPlugin m
+authLTI13WithWidget login = do
     AuthPlugin name (dispatchAuthRequest name) login
     where
         name = "lti13"
-        login _ = [whamlet|Login via your Learning Management System|]
-
