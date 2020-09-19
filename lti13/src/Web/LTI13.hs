@@ -129,6 +129,9 @@ data UncheckedLtiTokenClaims = UncheckedLtiTokenClaims
     , targetLinkUri :: Text
     , roles :: [Role]
     , email :: Maybe Text
+    , displayName :: Maybe Text
+    , firstName :: Maybe Text
+    , lastName :: Maybe Text
     , context :: Maybe ContextClaim
     } deriving (Show)
 
@@ -165,12 +168,16 @@ instance FromJSON UncheckedLtiTokenClaims where
             <*> v .: claimTargetLinkUri
             <*> v .: claimRoles
             <*> v .:? "email"
+            <*> v .:? "name"
+            <*> v .:? "given_name"
+            <*> v .:? "family_name"
             <*> v .:? claimContext
 
 instance ToJSON UncheckedLtiTokenClaims where
     toJSON (UncheckedLtiTokenClaims {
               messageType, ltiVersion, deploymentId
-            , targetLinkUri, roles, email, context}) =
+            , targetLinkUri, roles, email, displayName
+            , firstName, lastName, context}) =
         object [
               claimMessageType .= messageType
             , claimVersion .= ltiVersion
@@ -178,11 +185,15 @@ instance ToJSON UncheckedLtiTokenClaims where
             , claimTargetLinkUri .= targetLinkUri
             , claimRoles .= roles
             , "email" .= email
+            , "name" .= displayName
+            , "given_name" .= firstName
+            , "family_name" .= lastName
             , claimContext .= context
           ]
     toEncoding (UncheckedLtiTokenClaims {
               messageType, ltiVersion, deploymentId
-            , targetLinkUri, roles, email, context}) =
+            , targetLinkUri, roles, email, displayName
+            , firstName, lastName, context}) =
         pairs (
                claimMessageType .= messageType
             <> claimVersion .= ltiVersion
@@ -190,6 +201,9 @@ instance ToJSON UncheckedLtiTokenClaims where
             <> claimTargetLinkUri .= targetLinkUri
             <> claimRoles .= roles
             <> "email" .= email
+            <> "name" .= displayName
+            <> "given_name" .= firstName
+            <> "family_name" .= lastName
             <> claimContext .= context
           )
 
