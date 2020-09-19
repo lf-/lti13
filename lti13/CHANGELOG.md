@@ -15,3 +15,7 @@
 ## 0.1.2.1 -- 2020-09-16
 
 * Attempt to fix docs building on ghc862
+
+## 0.1.2.2 -- 2020-09-19
+
+* We now parse the name fields
