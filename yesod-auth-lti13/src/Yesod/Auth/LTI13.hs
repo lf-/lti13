@@ -31,6 +31,7 @@ module Yesod.Auth.LTI13 (
     , LtiTokenClaims(..)
     , UncheckedLtiTokenClaims(..)
     , ContextClaim(..)
+    , LisClaim(..)
     , Role(..)
     ) where
 
@@ -45,8 +46,9 @@ import qualified Crypto.PubKey.RSA as RSA
 import Yesod.Core.Types (TypedContent)
 import Yesod.Core (toTypedContent, permissionDenied, setSession, lookupSession, redirect,
         deleteSession, lookupSessionBS, setSessionBS, runRequestBody,
-        getRequest, MonadHandler, SessionMap, notFound, getUrlRender)
+        getRequest, MonadHandler, notFound, getUrlRender)
 import qualified Data.ByteString.Base64.URL as B64
+import Data.ByteString.Builder (toLazyByteString)
 import Web.OIDC.Client.Tokens (IdTokenClaims(..))
 import Yesod.Core (YesodRequest(reqGetParams))
 import Control.Exception.Safe (Exception, throwIO)
@@ -271,24 +273,26 @@ dispatchAuthenticate name = do
 
     setCredsRedirect myCreds
 
--- | Gets the @iss@ for the given sesssion
-getLtiIss :: SessionMap -> Maybe Issuer
-getLtiIss sess =
-    E.decodeUtf8 <$> Map.lookup "ltiIss" sess
+type CredsExtra = [(Text, Text)]
 
--- | Gets the @sub@ for the given session
-getLtiSub :: SessionMap -> Maybe Issuer
-getLtiSub sess =
-    E.decodeUtf8 <$> Map.lookup "ltiSub" sess
+-- | Gets the @iss@ for the given @credsExtra@.
+getLtiIss :: CredsExtra -> Maybe Issuer
+getLtiIss crExtra =
+    lookup "ltiIss" crExtra
+
+-- | Gets the @sub@ for the given @credsExtra@
+getLtiSub :: CredsExtra -> Maybe Issuer
+getLtiSub crExtra = lookup "ltiSub" crExtra
 
 -- | Gets and decodes the extra token claims with the full LTI launch
---   information from a session
---
---   Signature slightly inaccurate: the claims have been checked at this stage.
-getLtiToken :: SessionMap -> Maybe UncheckedLtiTokenClaims
-getLtiToken sess =
-    (Map.lookup "ltiToken" sess)
-    >>= A.decodeStrict
+--   information from a @credsExtra@
+getLtiToken :: CredsExtra -> Maybe LtiTokenClaims
+getLtiToken crExtra =
+    -- note: the claims have been checked before they got into the credsExtra.
+    LtiTokenClaims <$> ((lookup "ltiToken" crExtra) >>= intoClaims)
+    where
+        intoClaims :: Text -> Maybe UncheckedLtiTokenClaims
+        intoClaims = A.decode . toLazyByteString . E.encodeUtf8Builder
 
 -- | Callbacks into your site for LTI 1.3
 class (YesodAuth site)

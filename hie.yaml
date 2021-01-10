@@ -13,6 +13,11 @@ cradle:
         cradle:
           cabal:
             component: "lib:lti13"
+    - path: "./lti13/tests"
+      config:
+        cradle:
+          cabal:
+            component: "lti13:test:spec"
     - path: "./yesod-auth-lti13"
       config:
         cradle:

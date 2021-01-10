@@ -19,3 +19,8 @@
 ## 0.1.2.2 -- 2020-09-19
 
 * We now parse the name fields
+
+## 0.2.0.0 -- 2021-01-09
+
+* We parse the LIS claim
+* Unit tests added

@@ -20,3 +20,8 @@
 ## 0.1.2.2 -- 2020-09-19
 
 * No changes
+
+## 0.2.0.0 -- 2021-01-09
+
+* BREAKING: Change the signatures of the `getLtiIss`, `getLtiSub` and
+  `getLtiToken` functions to operate on `credsExtra` instead of sessions.

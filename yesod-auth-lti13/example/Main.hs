@@ -73,9 +73,9 @@ getRootR = do
     let
         mCredsIdent = decodeUtf8 <$> M.lookup "credsIdent" sess
         mCredsPlugin = decodeUtf8 <$> M.lookup "credsPlugin" sess
-        mIss = getLtiIss sess
-        mSub = getLtiSub sess
-        mTok = getLtiToken sess
+        mIss = M.lookup "ltiIss" sess
+        mSub = M.lookup "ltiSub" sess
+        mTok = M.lookup "ltiToken" sess
 
     defaultLayout [whamlet|
         <h1>Yesod Auth LTI1.3 Example

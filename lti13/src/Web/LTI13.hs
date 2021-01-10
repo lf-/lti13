@@ -4,8 +4,14 @@
 -- | A basic LTI 1.3 library.
 --   It's intended to be used by implementing routes for 'initiate' and
 --   'handleAuthResponse', and work out the associated parameters thereof.
+--
+--   This is written based on the LTI 1.3 specification
+--   <http://www.imsglobal.org/spec/lti/v1p3/ available from the IMS Global
+--   website>. Users will probably also find the <https://lti-ri.imsglobal.org/
+--   LTI Reference Implementation> helpful.
 module Web.LTI13 (
         Role(..)
+      , LisClaim(..)
       , ContextClaim(..)
       , UncheckedLtiTokenClaims(..)
       , LtiTokenClaims(..)
@@ -61,7 +67,7 @@ data Role = Administrator
           | Learner
           | Mentor
           | Other (Text)
-          deriving (Show)
+          deriving (Show, Eq)
 
 roleFromString :: Text -> Role
 roleFromString "http://purl.imsglobal.org/vocab/lis/v2/membership#Administrator"
@@ -90,13 +96,59 @@ instance FromJSON Role where
 instance ToJSON Role where
     toJSON = A.String . roleToString
 
+-- | <http://www.imsglobal.org/spec/lti/v1p3/#lislti LTI spec § D> LIS claim
+data LisClaim = LisClaim
+    { personSourcedId   :: Maybe Text
+    -- ^ LIS identifier for the person making the request.
+    , outcomeServiceUrl :: Maybe Text
+    -- ^ URL for the Basic Outcomes service, unique per-tool.
+    , courseOfferingSourcedId :: Maybe Text
+    -- ^ Identifier for the course
+    , courseSectionSourcedId :: Maybe Text
+    -- ^ Identifier for the section.
+    , resultSourcedId :: Maybe Text
+    -- ^ An identifier for the position in the gradebook associated with the
+    --   assignment being viewed.
+    } deriving (Show, Eq)
+
+instance FromJSON LisClaim where
+    parseJSON = withObject "LisClaim" $ \v ->
+        LisClaim
+            <$> v .:? "person_sourcedid"
+            <*> v .:? "outcome_service_url"
+            <*> v .:? "course_offering_sourcedid"
+            <*> v .:? "course_section_sourcedid"
+            <*> v .:? "result_sourcedid"
+
+instance ToJSON LisClaim where
+    toJSON (LisClaim {personSourcedId, outcomeServiceUrl,
+                courseOfferingSourcedId, courseSectionSourcedId,
+                resultSourcedId}) =
+        object [
+            "person_sourcedid" .= personSourcedId
+          , "outcome_service_url" .= outcomeServiceUrl
+          , "course_offering_sourcedid" .= courseOfferingSourcedId
+          , "course_section_sourcedid" .= courseSectionSourcedId
+          , "result_sourcedid" .= resultSourcedId
+          ]
+    toEncoding (LisClaim {personSourcedId, outcomeServiceUrl,
+                    courseOfferingSourcedId, courseSectionSourcedId,
+                    resultSourcedId}) =
+        pairs (
+            "person_sourcedid" .= personSourcedId <>
+            "outcome_service_url" .= outcomeServiceUrl <>
+            "course_offering_sourcedid" .= courseOfferingSourcedId <>
+            "course_section_sourcedid" .= courseSectionSourcedId <>
+            "result_sourcedid" .= resultSourcedId
+        )
+
 -- | <http://www.imsglobal.org/spec/lti/v1p3/#context-claim LTI spec § 5.4.1> context claim
 data ContextClaim = ContextClaim
     { contextId :: Text
     , contextLabel :: Maybe Text
     , contextTitle :: Maybe Text
     }
-    deriving (Show)
+    deriving (Show, Eq)
 
 instance FromJSON ContextClaim where
     parseJSON = withObject "ContextClaim" $ \v ->
@@ -133,12 +185,13 @@ data UncheckedLtiTokenClaims = UncheckedLtiTokenClaims
     , firstName :: Maybe Text
     , lastName :: Maybe Text
     , context :: Maybe ContextClaim
-    } deriving (Show)
+    , lis :: Maybe LisClaim
+    } deriving (Show, Eq)
 
 -- | An object representing in the type system a token whose claims have been
 --   validated.
 newtype LtiTokenClaims = LtiTokenClaims UncheckedLtiTokenClaims
-    deriving (Show)
+    deriving (Show, Eq)
 
 limitLength :: (Fail.MonadFail m) => Int -> Text -> m Text
 limitLength len string
@@ -158,6 +211,8 @@ claimRoles :: Text
 claimRoles = "https://purl.imsglobal.org/spec/lti/claim/roles"
 claimContext :: Text
 claimContext = "https://purl.imsglobal.org/spec/lti/claim/context"
+claimLis :: Text
+claimLis = "https://purl.imsglobal.org/spec/lti/claim/lis"
 
 instance FromJSON UncheckedLtiTokenClaims where
     parseJSON = withObject "LtiTokenClaims" $ \v ->
@@ -172,12 +227,13 @@ instance FromJSON UncheckedLtiTokenClaims where
             <*> v .:? "given_name"
             <*> v .:? "family_name"
             <*> v .:? claimContext
+            <*> v .:? claimLis
 
 instance ToJSON UncheckedLtiTokenClaims where
     toJSON (UncheckedLtiTokenClaims {
               messageType, ltiVersion, deploymentId
             , targetLinkUri, roles, email, displayName
-            , firstName, lastName, context}) =
+            , firstName, lastName, context, lis}) =
         object [
               claimMessageType .= messageType
             , claimVersion .= ltiVersion
@@ -189,11 +245,12 @@ instance ToJSON UncheckedLtiTokenClaims where
             , "given_name" .= firstName
             , "family_name" .= lastName
             , claimContext .= context
+            , claimLis .= lis
           ]
     toEncoding (UncheckedLtiTokenClaims {
               messageType, ltiVersion, deploymentId
             , targetLinkUri, roles, email, displayName
-            , firstName, lastName, context}) =
+            , firstName, lastName, context, lis}) =
         pairs (
                claimMessageType .= messageType
             <> claimVersion .= ltiVersion
@@ -205,6 +262,7 @@ instance ToJSON UncheckedLtiTokenClaims where
             <> "given_name" .= firstName
             <> "family_name" .= lastName
             <> claimContext .= context
+            <> claimLis .= lis
           )
 
 -- | A direct implementation of <http://www.imsglobal.org/spec/security/v1p0/#authentication-response-validation Security § 5.1.3>
