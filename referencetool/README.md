@@ -11,7 +11,7 @@ Going to document them here.
 
 In screenshot form:
 
-![edit platform page screenshot. details are all below](./edit platform.png)
+![edit platform page screenshot. details are all below](./edit-platform.png)
 
 ### "Client"
 
