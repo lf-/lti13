@@ -23,6 +23,10 @@ $ nix-shell
 [nix-shell]$ hoogle server
 ```
 
+## If the LTI-RI gets broken again
+
+See [./referencetool](./referencetool) for details on how to set it up again.
+
 ## TODOs
 
 * We are not compliant with [LTI 1.3 §

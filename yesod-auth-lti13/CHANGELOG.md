@@ -1,27 +1,33 @@
-# Revision history for lti13
+# Revision history for yesod-auth-lti13
 
-## 0.1.0.0 -- 2020-08-13
+## 0.2.0.1 -- 2021-02-26
 
-* Unreleased
+* Fix version bounds
+* Change the LTI-RI URL as our previous one got deleted (?!)
+
+## 0.2.0.0 -- 2021-01-09
+
+* BREAKING: Change the signatures of the `getLtiIss`, `getLtiSub` and
+  `getLtiToken` functions to operate on `credsExtra` instead of sessions.
+
+## 0.1.2.2 -- 2020-09-19
+
+* No changes
+
+## 0.1.2.1 -- 2020-09-16
+
+* No changes
+
+## 0.1.2.0 -- 2020-09-16
+
+* Add `authLTI13WithWidget`
 
 ## 0.1.1.0 -- 2020-09-15
 
 * Handle Canvas Cloud setting all their issuers the same.
 * Remove dependency on changed jose-jwt. Thanks @tekul for the help on this.
 
-## 0.1.2.0 -- 2020-09-16
+## 0.1.0.0 -- 2020-08-13
 
-* Add `authLTI13WithWidget`
+* Unreleased
 
-## 0.1.2.1 -- 2020-09-16
-
-* No changes
-
-## 0.1.2.2 -- 2020-09-19
-
-* No changes
-
-## 0.2.0.0 -- 2021-01-09
-
-* BREAKING: Change the signatures of the `getLtiIss`, `getLtiSub` and
-  `getLtiToken` functions to operate on `credsExtra` instead of sessions.

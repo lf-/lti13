@@ -55,7 +55,7 @@ parseFixed obj field fixedVal =
         if v == fixedVal then
             return v
         else
-            fail $ "field " ++ (show field) ++ " was not the required value " ++ (show fixedVal)
+            fail $ "field " ++ show field ++ " was not the required value " ++ show fixedVal
 
 -- | Roles in the target context (≈ course/section); see
 --   <http://www.imsglobal.org/spec/lti/v1p3/#lis-vocabulary-for-institution-roles LTI spec § A.2.2>
@@ -66,7 +66,7 @@ data Role = Administrator
           | Instructor
           | Learner
           | Mentor
-          | Other (Text)
+          | Other Text
           deriving (Show, Eq)
 
 roleFromString :: Text -> Role
@@ -121,9 +121,9 @@ instance FromJSON LisClaim where
             <*> v .:? "result_sourcedid"
 
 instance ToJSON LisClaim where
-    toJSON (LisClaim {personSourcedId, outcomeServiceUrl,
+    toJSON LisClaim {personSourcedId, outcomeServiceUrl,
                 courseOfferingSourcedId, courseSectionSourcedId,
-                resultSourcedId}) =
+                resultSourcedId} =
         object [
             "person_sourcedid" .= personSourcedId
           , "outcome_service_url" .= outcomeServiceUrl
@@ -131,9 +131,9 @@ instance ToJSON LisClaim where
           , "course_section_sourcedid" .= courseSectionSourcedId
           , "result_sourcedid" .= resultSourcedId
           ]
-    toEncoding (LisClaim {personSourcedId, outcomeServiceUrl,
+    toEncoding LisClaim {personSourcedId, outcomeServiceUrl,
                     courseOfferingSourcedId, courseSectionSourcedId,
-                    resultSourcedId}) =
+                    resultSourcedId} =
         pairs (
             "person_sourcedid" .= personSourcedId <>
             "outcome_service_url" .= outcomeServiceUrl <>
@@ -158,13 +158,13 @@ instance FromJSON ContextClaim where
             <*> v .:? "title"
 
 instance ToJSON ContextClaim where
-    toJSON (ContextClaim {contextId, contextLabel, contextTitle}) =
+    toJSON ContextClaim {contextId, contextLabel, contextTitle} =
         object [
             "id" .= contextId
           , "label" .= contextLabel
           , "title" .= contextTitle
           ]
-    toEncoding (ContextClaim {contextId, contextLabel, contextTitle}) =
+    toEncoding ContextClaim {contextId, contextLabel, contextTitle} =
         pairs (
             "id" .= contextId <>
             "label" .= contextLabel <>
@@ -195,7 +195,7 @@ newtype LtiTokenClaims = LtiTokenClaims UncheckedLtiTokenClaims
 
 limitLength :: (Fail.MonadFail m) => Int -> Text -> m Text
 limitLength len string
-    | (T.length string) <= len
+    | T.length string <= len
     = return string
 limitLength _ _ = fail "String is too long"
 
@@ -217,8 +217,8 @@ claimLis = "https://purl.imsglobal.org/spec/lti/claim/lis"
 instance FromJSON UncheckedLtiTokenClaims where
     parseJSON = withObject "LtiTokenClaims" $ \v ->
         UncheckedLtiTokenClaims
-            <$> (parseFixed v claimMessageType "LtiResourceLinkRequest")
-            <*> (parseFixed v claimVersion "1.3.0")
+            <$> parseFixed v claimMessageType "LtiResourceLinkRequest"
+            <*> parseFixed v claimVersion "1.3.0"
             <*> (v .: claimDeploymentId >>= limitLength 255)
             <*> v .: claimTargetLinkUri
             <*> v .: claimRoles
@@ -230,10 +230,10 @@ instance FromJSON UncheckedLtiTokenClaims where
             <*> v .:? claimLis
 
 instance ToJSON UncheckedLtiTokenClaims where
-    toJSON (UncheckedLtiTokenClaims {
+    toJSON UncheckedLtiTokenClaims {
               messageType, ltiVersion, deploymentId
             , targetLinkUri, roles, email, displayName
-            , firstName, lastName, context, lis}) =
+            , firstName, lastName, context, lis} =
         object [
               claimMessageType .= messageType
             , claimVersion .= ltiVersion
@@ -247,10 +247,10 @@ instance ToJSON UncheckedLtiTokenClaims where
             , claimContext .= context
             , claimLis .= lis
           ]
-    toEncoding (UncheckedLtiTokenClaims {
+    toEncoding UncheckedLtiTokenClaims {
               messageType, ltiVersion, deploymentId
             , targetLinkUri, roles, email, displayName
-            , firstName, lastName, context, lis}) =
+            , firstName, lastName, context, lis} =
         pairs (
                claimMessageType .= messageType
             <> claimVersion .= ltiVersion
@@ -289,7 +289,7 @@ validateLtiToken pinfo claims =
             -- client_id as a valid audience, or if it contains additional
             -- audiences not trusted by the Tool."
             -- Game on, I don't trust anyone else.
-            | (length $ aud c) == 1 && (platformClientId pinfo) `elem` (aud c)
+            | length  (aud c) == 1 && platformClientId pinfo `elem` aud c
                 = Right claims
             | otherwise
                 = Left "aud is invalid"
@@ -306,7 +306,7 @@ validateLtiToken pinfo claims =
         -- unwrap a validated token and rewrap it as a valid token
         valid (Left e) = Left e
         valid (Right tok) =
-            Right tok { otherClaims = (LtiTokenClaims $ otherClaims tok) }
+            Right tok { otherClaims = LtiTokenClaims $ otherClaims tok }
 
 
 -----------------------------------------------------------
@@ -398,7 +398,7 @@ type RequestParams = Map.Map Text Text
 initiate :: (MonadIO m) => AuthFlowConfig m -> RequestParams -> m (Issuer, ClientId, Text)
 initiate cfg params = do
     -- we don't care about target link uri since we only support one endpoint
-    res <- liftIO $ mapM (flip lookupOrThrow params) ["iss", "login_hint", "target_link_uri"]
+    res <- liftIO $ mapM (`lookupOrThrow` params) ["iss", "login_hint", "target_link_uri"]
     -- not actually fallible
     let [iss, loginHint, _] = res
     let messageHint = Map.lookup "lti_message_hint" params
@@ -412,7 +412,7 @@ initiate cfg params = do
     let gotCid = Map.lookup "client_id" params
     PlatformInfo
         { platformOidcAuthEndpoint = endpoint
-        , platformClientId = clientId } <- (getPlatformInfo cfg) (iss, gotCid)
+        , platformClientId = clientId } <- getPlatformInfo cfg (iss, gotCid)
 
     let ss = sessionStore cfg
     nonce <- sessionStoreGenerate ss
@@ -430,7 +430,7 @@ initiate cfg params = do
                 , ("nonce", nonce)
                 , ("prompt", "none")
                 ] ++ maybe [] (\mh -> [("lti_message_hint", encodeUtf8 mh)]) messageHint
-    return $ (iss, clientId, endpoint <> (decodeUtf8 . URI.renderQuery True) query)
+    return (iss, clientId, endpoint <> (decodeUtf8 . URI.renderQuery True) query)
 
 -- | Makes a fake OIDC object with the bare minimum attributes to hand to
 --   verification library functions
@@ -471,7 +471,7 @@ handleAuthResponse :: (MonadIO m)
     -> PlatformInfo
     -> m (Text, IdTokenClaims LtiTokenClaims)
 handleAuthResponse mgr cfg params pinfo = do
-    params' <- liftIO $ mapM (flip lookupOrThrow params) ["state", "id_token"]
+    params' <- liftIO $ mapM (`lookupOrThrow` params) ["state", "id_token"]
     let [state, idToken] = params'
 
     let PlatformInfo { jwksUrl } = pinfo

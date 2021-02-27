@@ -1,7 +1,7 @@
 cabal-version:       >=1.10
 
 name:                yesod-auth-lti13
-version:             0.2.0.0
+version:             0.2.0.1
 synopsis:            A yesod-auth plugin for LTI 1.3
 description:         A plugin using <https://hackage.haskell.org/package/lti13>
                      to implement IMS Global LTI 1.3 authentication for
@@ -25,17 +25,17 @@ library
     -- other-extensions:
     build-depends:       base >=4.12 && <5
                        -- these two are always updated in concert with each other
-                       , lti13                             == 0.2.0.0
-                       , base64-bytestring                 >= 1.0.0 && < 1.1
+                       , lti13                             == 0.2.0.1
+                       , base64-bytestring                 >= 1.0.0 && < 1.2
                        , bytestring                        >= 0.10.10 && < 0.11
                        , containers                        >= 0.6.2 && < 0.7
-                       , cryptonite                        >= 0.26 && < 0.27
+                       , cryptonite                        >= 0.26 && < 0.28
                        , http-client                       >= 0.6.4 && < 0.7
                        , text                              >= 1.2.4 && < 1.3
                        , random                            >= 1.1 && < 1.2
                        , microlens                         >= 0.4.11 && < 0.5
-                       , oidc-client                       >= 0.5.1 && < 0.6
-                       , aeson                             >= 1.4.7 && < 1.5
+                       , oidc-client                       >= 0.5.1 && < 0.7
+                       , aeson                             >= 1.4.7 && < 1.6
                        , safe-exceptions                   >= 0.1.7 && < 0.2
                        , yesod-auth                        >= 1.6.10 && < 1.7
                        , http-conduit                      >= 2.3.7 && < 2.4
@@ -44,7 +44,7 @@ library
                        , aeson-pretty                      >= 0.8.8 && < 0.9
                        , load-env                          >= 0.2.1 && < 0.3
                        , yesod                             >= 1.6.1 && < 1.7
-                       , jose-jwt                          >= 0.8.0 && < 0.9.0
+                       , jose-jwt                          >= 0.8.0 && < 0.10.0
                        , time                              >= 1.0.0 && < 1.11
     -- hs-source-dirs:
     default-language:    Haskell2010

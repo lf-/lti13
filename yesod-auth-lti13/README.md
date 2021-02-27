@@ -13,7 +13,10 @@ To build the example, pass `-f example` with your cabal commands. You can also
 enable it for haskell-language-server).
 
 A sample configuration of the LTI 1.3 reference implementation for a site using
-this library is available here: https://lti-ri.imsglobal.org/platforms/1255/
+this library is available here: https://lti-ri.imsglobal.org/platforms/1812/
+
+If this link breaks in the future, see the documentation at ../referencetool in
+the repo on how to create a new one.
 
 The following configuration is used on the provider (LMS) side, assuming your
 `AuthR` is `/auth`:

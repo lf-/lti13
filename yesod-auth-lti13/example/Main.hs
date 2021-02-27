@@ -119,8 +119,8 @@ instance YesodAuthLTI13 App where
     retrievePlatformInfo ("aaaaa", Just "abcde") = return $ PlatformInfo {
           platformIssuer = "aaaaa"
         , platformClientId = "abcde"
-        , platformOidcAuthEndpoint = "https://lti-ri.imsglobal.org/platforms/1255/authorizations/new"
-        , jwksUrl = "https://lti-ri.imsglobal.org/platforms/1255/platform_keys/1248.json"
+        , platformOidcAuthEndpoint = "https://lti-ri.imsglobal.org/platforms/1812/authorizations/new"
+        , jwksUrl = "https://lti-ri.imsglobal.org/platforms/1812/platform_keys/1732.json"
         }
     retrievePlatformInfo (iss, cid) = do
         $logWarn $ "unknown platform " <> iss <> " with client id " <> (T.pack $ show cid)

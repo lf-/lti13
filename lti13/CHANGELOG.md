@@ -1,26 +1,31 @@
 # Revision history for lti13
 
-## 0.1.0.0 -- 2020-08-13
+## 0.2.0.1 -- 2021-02-26
 
-* Unreleased
-
-## 0.1.1.0 -- 2020-09-15
-
-* Handle Canvas Cloud setting all their issuers the same.
-
-## 0.1.2.0 -- 2020-09-16
-
-* No changes
-
-## 0.1.2.1 -- 2020-09-16
-
-* Attempt to fix docs building on ghc862
-
-## 0.1.2.2 -- 2020-09-19
-
-* We now parse the name fields
+* Fix version bounds
 
 ## 0.2.0.0 -- 2021-01-09
 
 * We parse the LIS claim
 * Unit tests added
+
+## 0.1.2.2 -- 2020-09-19
+
+* We now parse the name fields
+
+## 0.1.2.1 -- 2020-09-16
+
+* Attempt to fix docs building on ghc862
+
+## 0.1.2.0 -- 2020-09-16
+
+* No changes
+
+## 0.1.1.0 -- 2020-09-15
+
+* Handle Canvas Cloud setting all their issuers the same.
+
+## 0.1.0.0 -- 2020-08-13
+
+* Unreleased
+
