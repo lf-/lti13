@@ -18,21 +18,33 @@
 --
 --       * Tool link URL: http://localhost:3000
 module Yesod.Auth.LTI13 (
-      PlatformInfo(..)
-    , Issuer
-    , ClientId
-    , Nonce
-    , authLTI13
+    -- * Integration with your site
+      authLTI13
     , authLTI13WithWidget
     , YesodAuthLTI13(..)
+
+    -- * @credsExtra@ getters
     , getLtiIss
     , getLtiSub
     , getLtiToken
+
+    -- * Data model
+    -- ** Token data
     , LtiTokenClaims(..)
     , UncheckedLtiTokenClaims(..)
     , ContextClaim(..)
     , LisClaim(..)
     , Role(..)
+
+    -- *** Anonymization
+    , anonymizeLtiTokenForLogging
+    , AnonymizedLtiTokenClaims(..)
+
+    -- ** Auth
+    , PlatformInfo(..)
+    , Issuer
+    , ClientId
+    , Nonce
     ) where
 
 import Yesod.Core.Widget

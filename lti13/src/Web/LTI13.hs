@@ -1,5 +1,6 @@
+{-# LANGUAGE NamedFieldPuns    #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE NamedFieldPuns #-}
+{-# LANGUAGE RecordWildCards   #-}
 
 -- | A basic LTI 1.3 library.
 --   It's intended to be used by implementing routes for 'initiate' and
@@ -10,11 +11,18 @@
 --   website>. Users will probably also find the <https://lti-ri.imsglobal.org/
 --   LTI Reference Implementation> helpful.
 module Web.LTI13 (
+      -- * Token contents/data model
         Role(..)
       , LisClaim(..)
       , ContextClaim(..)
       , UncheckedLtiTokenClaims(..)
       , LtiTokenClaims(..)
+
+      -- * Anonymizing tokens for logging
+      , AnonymizedLtiTokenClaims(..)
+      , anonymizeLtiTokenForLogging
+
+      -- * Validation and auth
       , validateLtiToken
       , LTI13Exception(..)
       , PlatformInfo(..)
@@ -26,27 +34,37 @@ module Web.LTI13 (
       , initiate
       , handleAuthResponse
     ) where
-import qualified Web.OIDC.Client.Settings as O
+import           Control.Exception.Safe             (Exception, MonadCatch,
+                                                     MonadThrow, Typeable,
+                                                     catch, throw, throwM)
+import           Control.Monad                      (when, (>=>))
+import qualified Control.Monad.Fail                 as Fail
+import           Control.Monad.IO.Class             (MonadIO, liftIO)
+import           Data.Aeson                         (FromJSON (parseJSON),
+                                                     Object,
+                                                     ToJSON (toEncoding, toJSON),
+                                                     eitherDecode, object,
+                                                     pairs, withObject,
+                                                     withText, (.:), (.:?),
+                                                     (.=))
+import qualified Data.Aeson                         as A
+import           Data.Aeson.Types                   (Parser)
+import qualified Data.Map.Strict                    as Map
+import           Data.Text                          (Text)
+import qualified Data.Text                          as T
+import           Data.Text.Encoding                 (decodeUtf8, encodeUtf8)
+import           Jose.Jwa                           (JwsAlg (RS256))
+import qualified Jose.Jwk                           as Jwk
+import           Network.HTTP.Client                (HttpException, Manager,
+                                                     httpLbs, parseRequest,
+                                                     responseBody)
+import qualified Network.HTTP.Types.URI             as URI
 import qualified Web.OIDC.Client.Discovery.Provider as P
-import Web.OIDC.Client.Tokens (nonce, aud, otherClaims, iss, IdTokenClaims)
-import Web.OIDC.Client.IdTokenFlow (getValidIdTokenClaims)
-import Web.OIDC.Client.Types (Nonce, SessionStore(..))
-import Jose.Jwa (JwsAlg(RS256))
-import qualified Jose.Jwk as Jwk
-import Control.Monad (when, (>=>))
-import qualified Control.Monad.Fail as Fail
-import Control.Exception.Safe (MonadCatch, catch, throwM, Typeable, Exception, MonadThrow, throw)
-import Control.Monad.IO.Class (liftIO, MonadIO)
-import Data.Aeson (eitherDecode, FromJSON (parseJSON), ToJSON(toJSON, toEncoding), Object,
-                   object, pairs, withObject, withText, (.:), (.:?), (.=))
-import qualified Data.Aeson as A
-import Data.Aeson.Types (Parser)
-import Data.Text (Text)
-import qualified Network.HTTP.Types.URI as URI
-import Network.HTTP.Client (responseBody, Manager, HttpException, parseRequest, httpLbs)
-import qualified Data.Map.Strict as Map
-import qualified Data.Text as T
-import Data.Text.Encoding (encodeUtf8, decodeUtf8)
+import           Web.OIDC.Client.IdTokenFlow        (getValidIdTokenClaims)
+import qualified Web.OIDC.Client.Settings           as O
+import           Web.OIDC.Client.Tokens             (IdTokenClaims, aud, iss,
+                                                     nonce, otherClaims)
+import           Web.OIDC.Client.Types              (Nonce, SessionStore (..))
 
 -- | Parses a JSON text field to a fixed expected value, failing otherwise
 parseFixed :: (FromJSON a, Eq a, Show a) => Object -> Text -> a -> Parser a
@@ -98,15 +116,15 @@ instance ToJSON Role where
 
 -- | <http://www.imsglobal.org/spec/lti/v1p3/#lislti LTI spec § D> LIS claim
 data LisClaim = LisClaim
-    { personSourcedId   :: Maybe Text
+    { personSourcedId         :: Maybe Text
     -- ^ LIS identifier for the person making the request.
-    , outcomeServiceUrl :: Maybe Text
+    , outcomeServiceUrl       :: Maybe Text
     -- ^ URL for the Basic Outcomes service, unique per-tool.
     , courseOfferingSourcedId :: Maybe Text
     -- ^ Identifier for the course
-    , courseSectionSourcedId :: Maybe Text
+    , courseSectionSourcedId  :: Maybe Text
     -- ^ Identifier for the section.
-    , resultSourcedId :: Maybe Text
+    , resultSourcedId         :: Maybe Text
     -- ^ An identifier for the position in the gradebook associated with the
     --   assignment being viewed.
     } deriving (Show, Eq)
@@ -144,7 +162,7 @@ instance ToJSON LisClaim where
 
 -- | <http://www.imsglobal.org/spec/lti/v1p3/#context-claim LTI spec § 5.4.1> context claim
 data ContextClaim = ContextClaim
-    { contextId :: Text
+    { contextId    :: Text
     , contextLabel :: Maybe Text
     , contextTitle :: Maybe Text
     }
@@ -175,22 +193,26 @@ instance ToJSON ContextClaim where
 --   instead prefer the @newtype@ 'LtiTokenClaims' which has had checking
 --   performed on it.
 data UncheckedLtiTokenClaims = UncheckedLtiTokenClaims
-    { messageType :: Text
-    , ltiVersion :: Text
-    , deploymentId :: Text
+    { messageType   :: Text
+    , ltiVersion    :: Text
+    , deploymentId  :: Text
     , targetLinkUri :: Text
-    , roles :: [Role]
-    , email :: Maybe Text
-    , displayName :: Maybe Text
-    , firstName :: Maybe Text
-    , lastName :: Maybe Text
-    , context :: Maybe ContextClaim
-    , lis :: Maybe LisClaim
+    , roles         :: [Role]
+    , email         :: Maybe Text
+    , displayName   :: Maybe Text
+    , firstName     :: Maybe Text
+    , lastName      :: Maybe Text
+    , context       :: Maybe ContextClaim
+    , lis           :: Maybe LisClaim
     } deriving (Show, Eq)
 
 -- | An object representing in the type system a token whose claims have been
 --   validated.
-newtype LtiTokenClaims = LtiTokenClaims UncheckedLtiTokenClaims
+newtype LtiTokenClaims = LtiTokenClaims { unLtiTokenClaims :: UncheckedLtiTokenClaims }
+    deriving (Show, Eq)
+
+-- | LTI token claims from which all student data has been removed. For logging.
+newtype AnonymizedLtiTokenClaims = AnonymizedLtiTokenClaims UncheckedLtiTokenClaims
     deriving (Show, Eq)
 
 limitLength :: (Fail.MonadFail m) => Int -> Text -> m Text
@@ -333,27 +355,27 @@ type ClientId = Text
 data PlatformInfo = PlatformInfo
     {
     -- | Issuer value
-      platformIssuer :: Issuer
+      platformIssuer           :: Issuer
     -- | @client_id@
-    , platformClientId :: ClientId
+    , platformClientId         :: ClientId
     -- | URL the client is redirected to for <http://www.imsglobal.org/spec/security/v1p0/#step-3-authentication-response auth stage 2>.
     --   See also <http://www.imsglobal.org/spec/security/v1p0/#openid_connect_launch_flow Security spec § 5.1.1>
     , platformOidcAuthEndpoint :: Text
     -- | URL for a JSON object containing the JWK signing keys for the platform
-    , jwksUrl :: String
+    , jwksUrl                  :: String
     }
 
 -- | Issuer/@iss@ field
 type Issuer = Text
 
--- | Object you have to provide defining integration points with your app
+-- | Structure you have to provide defining integration points with your app
 data AuthFlowConfig m = AuthFlowConfig
-    { getPlatformInfo       :: (Issuer, Maybe ClientId) -> m PlatformInfo
+    { getPlatformInfo :: (Issuer, Maybe ClientId) -> m PlatformInfo
     -- ^ Access some persistent storage of the configured platforms and return the
     --   PlatformInfo for a given platform by name
-    , haveSeenNonce         :: Nonce -> m Bool
-    , myRedirectUri         :: Text
-    , sessionStore          :: SessionStore m
+    , haveSeenNonce   :: Nonce -> m Bool
+    , myRedirectUri   :: Text
+    , sessionStore    :: SessionStore m
     -- ^ Note that as in the example for haskell-oidc-client, this is intended to
     --   be partially parameterized already with some separate cookie you give
     --   the browser. You should also store the @iss@ from the 'initiate' stage
@@ -385,7 +407,7 @@ lookupOrThrow :: (MonadThrow m) => Text -> Map.Map Text Text -> m Text
 lookupOrThrow name map_ =
     case Map.lookup name map_ of
         Nothing -> throw $ InvalidHandshake $ "Missing `" <> name <> "`"
-        Just a -> return a
+        Just a  -> return a
 
 -- | Parameters to a request, either in the URL with a @GET@ or in the body
 --   with a @POST@
@@ -492,3 +514,40 @@ handleAuthResponse mgr cfg params pinfo = do
     case validateLtiToken pinfo toCheck of
         Left err  -> liftIO $ throw $ InvalidLtiToken err
         Right tok -> return (state, tok)
+
+-- | Removes PII of the user from the token, retaining only information about
+--   the system in general or the context.
+--
+--   Fields that are 'Maybe' are kept as 'Maybe', with the contents replaced
+--   with @"**"@ if they were 'Just' and otherwise kept as 'Nothing'.
+anonymizeLtiTokenForLogging :: UncheckedLtiTokenClaims -> AnonymizedLtiTokenClaims
+anonymizeLtiTokenForLogging UncheckedLtiTokenClaims {..} =
+    AnonymizedLtiTokenClaims $ UncheckedLtiTokenClaims
+        { messageType
+        , ltiVersion
+        , deploymentId
+        -- this should not identify the user; it is at most a class item
+        , targetLinkUri
+        , roles
+        , displayName = anonymized <$> displayName
+        , firstName = anonymized <$> firstName
+        , lastName = anonymized <$> lastName
+        , context
+        , email = anonymized <$> email
+        , lis = anonymizedLis <$> lis
+        }
+    where
+        anonymized _ = "**"
+        anonymizedLis LisClaim {..} = LisClaim
+            -- we really don't know what they will put in this; it might be
+            -- student specific
+            { personSourcedId = anonymized <$> personSourcedId
+            -- spec strongly suggests this be the same across launches ie only
+            -- identifies the context
+            , outcomeServiceUrl
+            , courseOfferingSourcedId
+            , courseSectionSourcedId
+            -- likewise with personSourcedId, we don't know what will be put in
+            -- here. it's probably a guid but let's be safe
+            , resultSourcedId = anonymized <$> resultSourcedId
+            }

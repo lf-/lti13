@@ -1,5 +1,9 @@
 # Revision history for yesod-auth-lti13
 
+## 0.2.0.2 -- 2021-07-28
+
+* lti13: add anonymization of tokens
+
 ## 0.2.0.1 -- 2021-02-26
 
 * Fix version bounds

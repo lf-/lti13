@@ -1,5 +1,9 @@
 # Revision history for lti13
 
+## 0.2.0.2 -- 2021-07-18
+
+* Add anonymization of tokens for logging
+
 ## 0.2.0.1 -- 2021-02-26
 
 * Fix version bounds

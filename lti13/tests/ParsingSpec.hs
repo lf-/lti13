@@ -49,11 +49,11 @@ spec = do
             add x y == add y x
     describe "main parser" $ do
         it "parses the file from section E of the lti spec" $ do
-            let v = (decodeStrict ltiSpecExample) :: Maybe UncheckedLtiTokenClaims
+            let v = decodeStrict ltiSpecExample :: Maybe UncheckedLtiTokenClaims
             -- (putStrLn . show $ v) `shouldReturn` ()
-            v `shouldBe` (Just specExampleOutput)
+            v `shouldBe` Just specExampleOutput
             let roundTripped = decode . encode =<< v
-            roundTripped `shouldBe` (Just specExampleOutput)
+            roundTripped `shouldBe` Just specExampleOutput
 
 add :: Int -> Int -> Int
 add x y = x + y
