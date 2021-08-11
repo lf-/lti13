@@ -1,10 +1,10 @@
+{-# LANGUAGE LambdaCase        #-}
+{-# LANGUAGE NamedFieldPuns    #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE NamedFieldPuns #-}
-{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE QuasiQuotes       #-}
+{-# LANGUAGE RankNTypes        #-}
+{-# LANGUAGE TemplateHaskell   #-}
+{-# LANGUAGE TypeFamilies      #-}
 
 
 -- | A Yesod authentication module for LTI 1.3
@@ -47,33 +47,41 @@ module Yesod.Auth.LTI13 (
     , Nonce
     ) where
 
-import Yesod.Core.Widget
-import Yesod.Auth (Auth, Route(PluginR), setCredsRedirect, Creds(..), authHttpManager, AuthHandler, AuthPlugin(..), YesodAuth)
-import Web.LTI13
-import qualified Data.Aeson as A
-import Data.Text (Text)
-import qualified Data.Map.Strict as Map
-import Crypto.Random (getRandomBytes)
-import qualified Crypto.PubKey.RSA as RSA
-import Yesod.Core.Types (TypedContent)
-import Yesod.Core (toTypedContent, permissionDenied, setSession, lookupSession, redirect,
-        deleteSession, lookupSessionBS, setSessionBS, runRequestBody,
-        getRequest, MonadHandler, notFound, getUrlRender)
+import           Control.Exception.Safe     (Exception, throwIO)
+import           Control.Monad.IO.Class     (MonadIO (liftIO))
+import qualified Crypto.PubKey.RSA          as RSA
+import           Crypto.Random              (getRandomBytes)
+import qualified Data.Aeson                 as A
+import qualified Data.ByteString            as BS
 import qualified Data.ByteString.Base64.URL as B64
-import Data.ByteString.Builder (toLazyByteString)
-import Web.OIDC.Client.Tokens (IdTokenClaims(..))
-import Yesod.Core (YesodRequest(reqGetParams))
-import Control.Exception.Safe (Exception, throwIO)
-import Control.Monad.IO.Class (MonadIO(liftIO))
-import Web.OIDC.Client (Nonce)
-import Yesod.Core.Handler (getRouteToParent)
-import qualified Data.Text.Encoding as E
-import qualified Data.ByteString.Lazy as LBS
-import qualified Data.ByteString as BS
-import Jose.Jwk (JwkSet(..), Jwk(..), generateRsaKeyPair, KeyUse(Sig))
-import Data.Time (getCurrentTime)
-import Jose.Jwt (KeyId(UTCKeyId))
-import Jose.Jwa (Alg(Signed), JwsAlg(RS256))
+import           Data.ByteString.Builder    (toLazyByteString)
+import qualified Data.ByteString.Lazy       as LBS
+import qualified Data.Map.Strict            as Map
+import           Data.Text                  (Text)
+import qualified Data.Text.Encoding         as E
+import           Data.Time                  (getCurrentTime)
+import           Jose.Jwa                   (Alg (Signed), JwsAlg (RS256))
+import           Jose.Jwk                   (Jwk (..), JwkSet (..),
+                                             KeyUse (Sig), generateRsaKeyPair)
+import           Jose.Jwt                   (KeyId (UTCKeyId))
+import           Web.LTI13
+import           Web.OIDC.Client            (Nonce)
+import           Web.OIDC.Client.Tokens     (IdTokenClaims (..))
+import           Yesod.Auth                 (Auth, AuthHandler, AuthPlugin (..),
+                                             Creds (..), Route (PluginR),
+                                             YesodAuth, authHttpManager,
+                                             setCredsRedirect)
+import           Yesod.Core                 (MonadHandler,
+                                             YesodRequest (reqGetParams),
+                                             deleteSession, getRequest,
+                                             getUrlRender, lookupSession,
+                                             lookupSessionBS, notFound,
+                                             permissionDenied, redirect,
+                                             runRequestBody, setSession,
+                                             setSessionBS, toTypedContent)
+import           Yesod.Core.Handler         (getRouteToParent)
+import           Yesod.Core.Types           (TypedContent)
+import           Yesod.Core.Widget
 
 data YesodAuthLTI13Exception
     = LTIException Text LTI13Exception
@@ -117,8 +125,7 @@ unifyParams
     => Method
     -> m RequestParams
 unifyParams GET = do
-    req <- getRequest
-    return $ Map.fromList $ reqGetParams req
+    Map.fromList . reqGetParams <$> getRequest
 unifyParams POST = do
     (params, _) <- runRequestBody
     return $ Map.fromList params
@@ -130,19 +137,19 @@ prefixSession name datum =
 
 -- | Makes the name for the @clientId@ cookie
 myCid :: Text -> Text
-myCid = flip prefixSession $ "clientId"
+myCid = flip prefixSession "clientId"
 
 -- | Makes the name for the @iss@ cookie
 myIss :: Text -> Text
-myIss = flip prefixSession $ "iss"
+myIss = flip prefixSession "iss"
 
 -- | Makes the name for the @state@ cookie
 myState :: Text -> Text
-myState = flip prefixSession $ "state"
+myState = flip prefixSession "state"
 
 -- | Makes the name for the @nonce@ cookie
 myNonce :: Text -> Text
-myNonce = flip prefixSession $ "nonce"
+myNonce = flip prefixSession "nonce"
 
 mkSessionStore :: MonadHandler m => Text -> SessionStore m
 mkSessionStore name =
@@ -154,7 +161,7 @@ mkSessionStore name =
         }
     where
         -- we make only url safe stuff to not cause chaos elsewhere
-        gen = liftIO $ (B64.encode <$> getRandomBytes 33)
+        gen = liftIO (B64.encode <$> getRandomBytes 33)
         sname = myState name
         nname = myNonce name
         sessionSave state nonce = do
@@ -204,7 +211,7 @@ dispatchJwks name = do
                     pure (A.decodeStrict jwks)
     let pubs = JwkSet $ map rsaPrivToPub privs
     return $ toTypedContent $ A.toJSON pubs
-    where makeJwks = (LBS.toStrict . A.encode) <$> makeJwkSet
+    where makeJwks = LBS.toStrict . A.encode <$> makeJwkSet
           makeJwkSet = fmap (\jwk -> JwkSet {keys = [jwk]}) createNewJwk
 
 rsaPrivToPub :: Jwk -> Jwk
@@ -235,8 +242,7 @@ dispatchInitiate name params = do
 type State = Text
 
 checkCSRFToken :: MonadHandler m => State -> Maybe State -> m ()
-checkCSRFToken state state' = do
-    -- they do not match or the state is wrong
+checkCSRFToken state state' =
     if state' /= Just state then do
         permissionDenied "Bad CSRF token"
     else
@@ -289,19 +295,18 @@ type CredsExtra = [(Text, Text)]
 
 -- | Gets the @iss@ for the given @credsExtra@.
 getLtiIss :: CredsExtra -> Maybe Issuer
-getLtiIss crExtra =
-    lookup "ltiIss" crExtra
+getLtiIss = lookup "ltiIss"
 
 -- | Gets the @sub@ for the given @credsExtra@
 getLtiSub :: CredsExtra -> Maybe Issuer
-getLtiSub crExtra = lookup "ltiSub" crExtra
+getLtiSub = lookup "ltiSub"
 
 -- | Gets and decodes the extra token claims with the full LTI launch
 --   information from a @credsExtra@
 getLtiToken :: CredsExtra -> Maybe LtiTokenClaims
 getLtiToken crExtra =
     -- note: the claims have been checked before they got into the credsExtra.
-    LtiTokenClaims <$> ((lookup "ltiToken" crExtra) >>= intoClaims)
+    LtiTokenClaims <$> (lookup "ltiToken" crExtra >>= intoClaims)
     where
         intoClaims :: Text -> Maybe UncheckedLtiTokenClaims
         intoClaims = A.decode . toLazyByteString . E.encodeUtf8Builder
@@ -314,7 +319,7 @@ class (YesodAuth site)
         --  returning False, then when seen again, True should be returned.
         --  See the <http://www.imsglobal.org/spec/security/v1p0/#authentication-response-validation
         --  relevant section of the IMS security specification> for details.
-        checkSeenNonce :: Nonce -> AuthHandler site (Bool)
+        checkSeenNonce :: Nonce -> AuthHandler site Bool
 
         -- | Get the configuration for the given platform.
         --
@@ -323,15 +328,15 @@ class (YesodAuth site)
         --   Canvas. You *must* therefore key your 'PlatformInfo' retrieval
         --   with the pair of both and throw an error if there are multiple
         --   'ClientId' for the given 'Issuer' and the 'ClientId' is 'Nothing'.
-        retrievePlatformInfo :: (Issuer, Maybe ClientId) -> AuthHandler site (PlatformInfo)
+        retrievePlatformInfo :: (Issuer, Maybe ClientId) -> AuthHandler site PlatformInfo
 
         -- | Retrieve JWKs list from the database or other store. If not
         --   present, please create a new one by evaluating the given 'IO', store
         --   it, and return it.
         retrieveOrInsertJwks
-            :: (IO BS.ByteString)
+            :: IO BS.ByteString
             -- ^ an 'IO' which, if evaluated, will make a new 'Jwk' set
-            -> AuthHandler site (BS.ByteString)
+            -> AuthHandler site BS.ByteString
 
 -- | Auth plugin. Add this to @appAuthPlugins@ to enable this plugin.
 authLTI13 :: YesodAuthLTI13 m => AuthPlugin m
@@ -342,7 +347,7 @@ authLTI13 = authLTI13WithWidget login
 -- | Auth plugin. The same as 'authLTI13' but you can provide your own template
 --   for the login hint page.
 authLTI13WithWidget :: YesodAuthLTI13 m => ((Route Auth -> Route m) -> WidgetFor m ()) -> AuthPlugin m
-authLTI13WithWidget login = do
+authLTI13WithWidget login =
     AuthPlugin name (dispatchAuthRequest name) login
     where
         name = "lti13"
