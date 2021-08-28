@@ -1,8 +1,4 @@
-{-# LANGUAGE NamedFieldPuns    #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards   #-}
-
--- | A basic LTI 1.3 library.
+-- | A simple LTI 1.3 library.
 --   It's intended to be used by implementing routes for 'initiate' and
 --   'handleAuthResponse', and work out the associated parameters thereof.
 --

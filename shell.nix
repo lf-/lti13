@@ -1,7 +1,7 @@
 let sources = import ./nix/sources.nix;
 in
 
-{ nixpkgs ? import ./nix/nixpkgs.nix { inherit sources ghcVer example; }, ghcVer ? "ghc884", example ? true }:
+{ nixpkgs ? import ./nix/nixpkgs.nix { inherit sources ghcVer example; }, ghcVer ? "ghc8106", example ? true }:
 
 let mypkgs = import ./default.nix { inherit nixpkgs ghcVer; };
 in

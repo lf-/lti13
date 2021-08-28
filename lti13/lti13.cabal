@@ -38,6 +38,12 @@ library
     exposed-modules:     Web.LTI13
     -- other-modules:
     -- other-extensions:
+    default-extensions:
+          NamedFieldPuns
+        , OverloadedStrings
+        , RecordWildCards
+        , DeriveGeneric
+
     hs-source-dirs:      src
     build-depends:       aeson                 >= 1.4.7 && < 1.6
                        , base                  >= 4.12.0 && < 5
