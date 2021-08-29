@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -Wno-unused-imports #-}
 -- | A simple LTI 1.3 library.
 --   It's intended to be used by implementing routes for 'initiate' and
 --   'handleAuthResponse', and work out the associated parameters thereof.
@@ -49,6 +50,8 @@ import qualified Data.Map.Strict                    as Map
 import           Data.Text                          (Text)
 import qualified Data.Text                          as T
 import           Data.Text.Encoding                 (decodeUtf8, encodeUtf8)
+import           Data.Tuple                         (swap)
+import           GHC.Generics                       (Generic)
 import           Jose.Jwa                           (JwsAlg (RS256))
 import qualified Jose.Jwk                           as Jwk
 import           Network.HTTP.Client                (HttpException, Manager,
@@ -61,227 +64,9 @@ import qualified Web.OIDC.Client.Settings           as O
 import           Web.OIDC.Client.Tokens             (IdTokenClaims, aud, iss,
                                                      nonce, otherClaims)
 import           Web.OIDC.Client.Types              (Nonce, SessionStore (..))
+import Web.LTI13.Types
+import Data.Time (ZonedTime)
 
--- | Parses a JSON text field to a fixed expected value, failing otherwise
-parseFixed :: (FromJSON a, Eq a, Show a) => Object -> Text -> a -> Parser a
-parseFixed obj field fixedVal =
-    obj .: field >>= \v ->
-        if v == fixedVal then
-            return v
-        else
-            fail $ "field " ++ show field ++ " was not the required value " ++ show fixedVal
-
--- | Roles in the target context (≈ course/section); see
---   <http://www.imsglobal.org/spec/lti/v1p3/#lis-vocabulary-for-institution-roles LTI spec § A.2.2>
---   and <http://www.imsglobal.org/spec/lti/v1p3/#roles-claim LTI spec § 5.3.7>
---   for details
-data Role = Administrator
-          | ContentDeveloper
-          | Instructor
-          | Learner
-          | Mentor
-          | Other Text
-          deriving (Show, Eq)
-
-roleFromString :: Text -> Role
-roleFromString "http://purl.imsglobal.org/vocab/lis/v2/membership#Administrator"
-    = Administrator
-roleFromString "http://purl.imsglobal.org/vocab/lis/v2/membership#ContentDeveloper"
-    = ContentDeveloper
-roleFromString "http://purl.imsglobal.org/vocab/lis/v2/membership#Instructor"
-    = Instructor
-roleFromString "http://purl.imsglobal.org/vocab/lis/v2/membership#Learner"
-    = Learner
-roleFromString "http://purl.imsglobal.org/vocab/lis/v2/membership#Mentor"
-    = Mentor
-roleFromString s = Other s
-
-roleToString :: Role -> Text
-roleToString Administrator = "http://purl.imsglobal.org/vocab/lis/v2/membership#Administrator"
-roleToString ContentDeveloper = "http://purl.imsglobal.org/vocab/lis/v2/membership#ContentDeveloper"
-roleToString Instructor = "http://purl.imsglobal.org/vocab/lis/v2/membership#Instructor"
-roleToString Learner = "http://purl.imsglobal.org/vocab/lis/v2/membership#Learner"
-roleToString Mentor = "http://purl.imsglobal.org/vocab/lis/v2/membership#Mentor"
-roleToString (Other s) = s
-
-instance FromJSON Role where
-    parseJSON = withText "Role" $ return . roleFromString
-
-instance ToJSON Role where
-    toJSON = A.String . roleToString
-
--- | <http://www.imsglobal.org/spec/lti/v1p3/#lislti LTI spec § D> LIS claim
-data LisClaim = LisClaim
-    { personSourcedId         :: Maybe Text
-    -- ^ LIS identifier for the person making the request.
-    , outcomeServiceUrl       :: Maybe Text
-    -- ^ URL for the Basic Outcomes service, unique per-tool.
-    , courseOfferingSourcedId :: Maybe Text
-    -- ^ Identifier for the course
-    , courseSectionSourcedId  :: Maybe Text
-    -- ^ Identifier for the section.
-    , resultSourcedId         :: Maybe Text
-    -- ^ An identifier for the position in the gradebook associated with the
-    --   assignment being viewed.
-    } deriving (Show, Eq)
-
-instance FromJSON LisClaim where
-    parseJSON = withObject "LisClaim" $ \v ->
-        LisClaim
-            <$> v .:? "person_sourcedid"
-            <*> v .:? "outcome_service_url"
-            <*> v .:? "course_offering_sourcedid"
-            <*> v .:? "course_section_sourcedid"
-            <*> v .:? "result_sourcedid"
-
-instance ToJSON LisClaim where
-    toJSON LisClaim {personSourcedId, outcomeServiceUrl,
-                courseOfferingSourcedId, courseSectionSourcedId,
-                resultSourcedId} =
-        object [
-            "person_sourcedid" .= personSourcedId
-          , "outcome_service_url" .= outcomeServiceUrl
-          , "course_offering_sourcedid" .= courseOfferingSourcedId
-          , "course_section_sourcedid" .= courseSectionSourcedId
-          , "result_sourcedid" .= resultSourcedId
-          ]
-    toEncoding LisClaim {personSourcedId, outcomeServiceUrl,
-                    courseOfferingSourcedId, courseSectionSourcedId,
-                    resultSourcedId} =
-        pairs (
-            "person_sourcedid" .= personSourcedId <>
-            "outcome_service_url" .= outcomeServiceUrl <>
-            "course_offering_sourcedid" .= courseOfferingSourcedId <>
-            "course_section_sourcedid" .= courseSectionSourcedId <>
-            "result_sourcedid" .= resultSourcedId
-        )
-
--- | <http://www.imsglobal.org/spec/lti/v1p3/#context-claim LTI spec § 5.4.1> context claim
-data ContextClaim = ContextClaim
-    { contextId    :: Text
-    , contextLabel :: Maybe Text
-    , contextTitle :: Maybe Text
-    }
-    deriving (Show, Eq)
-
-instance FromJSON ContextClaim where
-    parseJSON = withObject "ContextClaim" $ \v ->
-        ContextClaim
-            <$> (v .: "id" >>= limitLength 255)
-            <*> v .:? "label"
-            <*> v .:? "title"
-
-instance ToJSON ContextClaim where
-    toJSON ContextClaim {contextId, contextLabel, contextTitle} =
-        object [
-            "id" .= contextId
-          , "label" .= contextLabel
-          , "title" .= contextTitle
-          ]
-    toEncoding ContextClaim {contextId, contextLabel, contextTitle} =
-        pairs (
-            "id" .= contextId <>
-            "label" .= contextLabel <>
-            "title" .= contextTitle
-        )
-
--- | LTI specific claims on a token. You should not accept this type, and
---   instead prefer the @newtype@ 'LtiTokenClaims' which has had checking
---   performed on it.
-data UncheckedLtiTokenClaims = UncheckedLtiTokenClaims
-    { messageType   :: Text
-    , ltiVersion    :: Text
-    , deploymentId  :: Text
-    , targetLinkUri :: Text
-    , roles         :: [Role]
-    , email         :: Maybe Text
-    , displayName   :: Maybe Text
-    , firstName     :: Maybe Text
-    , lastName      :: Maybe Text
-    , context       :: Maybe ContextClaim
-    , lis           :: Maybe LisClaim
-    } deriving (Show, Eq)
-
--- | An object representing in the type system a token whose claims have been
---   validated.
-newtype LtiTokenClaims = LtiTokenClaims { unLtiTokenClaims :: UncheckedLtiTokenClaims }
-    deriving (Show, Eq)
-
--- | LTI token claims from which all student data has been removed. For logging.
-newtype AnonymizedLtiTokenClaims = AnonymizedLtiTokenClaims UncheckedLtiTokenClaims
-    deriving (Show, Eq)
-
-limitLength :: (Fail.MonadFail m) => Int -> Text -> m Text
-limitLength len string
-    | T.length string <= len
-    = return string
-limitLength _ _ = fail "String is too long"
-
-claimMessageType :: Text
-claimMessageType = "https://purl.imsglobal.org/spec/lti/claim/message_type"
-claimVersion :: Text
-claimVersion = "https://purl.imsglobal.org/spec/lti/claim/version"
-claimDeploymentId :: Text
-claimDeploymentId = "https://purl.imsglobal.org/spec/lti/claim/deployment_id"
-claimTargetLinkUri :: Text
-claimTargetLinkUri = "https://purl.imsglobal.org/spec/lti/claim/target_link_uri"
-claimRoles :: Text
-claimRoles = "https://purl.imsglobal.org/spec/lti/claim/roles"
-claimContext :: Text
-claimContext = "https://purl.imsglobal.org/spec/lti/claim/context"
-claimLis :: Text
-claimLis = "https://purl.imsglobal.org/spec/lti/claim/lis"
-
-instance FromJSON UncheckedLtiTokenClaims where
-    parseJSON = withObject "LtiTokenClaims" $ \v ->
-        UncheckedLtiTokenClaims
-            <$> parseFixed v claimMessageType "LtiResourceLinkRequest"
-            <*> parseFixed v claimVersion "1.3.0"
-            <*> (v .: claimDeploymentId >>= limitLength 255)
-            <*> v .: claimTargetLinkUri
-            <*> v .: claimRoles
-            <*> v .:? "email"
-            <*> v .:? "name"
-            <*> v .:? "given_name"
-            <*> v .:? "family_name"
-            <*> v .:? claimContext
-            <*> v .:? claimLis
-
-instance ToJSON UncheckedLtiTokenClaims where
-    toJSON UncheckedLtiTokenClaims {
-              messageType, ltiVersion, deploymentId
-            , targetLinkUri, roles, email, displayName
-            , firstName, lastName, context, lis} =
-        object [
-              claimMessageType .= messageType
-            , claimVersion .= ltiVersion
-            , claimDeploymentId .= deploymentId
-            , claimTargetLinkUri .= targetLinkUri
-            , claimRoles .= roles
-            , "email" .= email
-            , "name" .= displayName
-            , "given_name" .= firstName
-            , "family_name" .= lastName
-            , claimContext .= context
-            , claimLis .= lis
-          ]
-    toEncoding UncheckedLtiTokenClaims {
-              messageType, ltiVersion, deploymentId
-            , targetLinkUri, roles, email, displayName
-            , firstName, lastName, context, lis} =
-        pairs (
-               claimMessageType .= messageType
-            <> claimVersion .= ltiVersion
-            <> claimDeploymentId .= deploymentId
-            <> claimTargetLinkUri .= targetLinkUri
-            <> claimRoles .= roles
-            <> "email" .= email
-            <> "name" .= displayName
-            <> "given_name" .= firstName
-            <> "family_name" .= lastName
-            <> claimContext .= context
-            <> claimLis .= lis
-          )
 
 -- | A direct implementation of <http://www.imsglobal.org/spec/security/v1p0/#authentication-response-validation Security § 5.1.3>
 validateLtiToken
@@ -290,11 +75,18 @@ validateLtiToken
     -> Either Text (IdTokenClaims LtiTokenClaims)
 validateLtiToken pinfo claims =
     valid .
-        (issuerMatches
+        (messageTypeIsValid
+         >=> issuerMatches
          >=> audContainsClientId
          >=> hasNonce) $ claims
     where
         -- step 1 handled before we are called
+        -- Check that this token is actually for a Request rather than a Response
+        messageTypeIsValid c
+            | messageType (otherClaims c) `elem` [LtiResourceLinkRequest, LtiDeepLinkingRequest]
+                = Right claims
+            | otherwise
+                = Left "invalid LTI message type"
         -- step 2
         issuerMatches c
             | iss c == platformIssuer pinfo
@@ -307,7 +99,7 @@ validateLtiToken pinfo claims =
             -- client_id as a valid audience, or if it contains additional
             -- audiences not trusted by the Tool."
             -- Game on, I don't trust anyone else.
-            | length  (aud c) == 1 && platformClientId pinfo `elem` aud c
+            | length (aud c) == 1 && platformClientId pinfo `elem` aud c
                 = Right claims
             | otherwise
                 = Left "aud is invalid"
@@ -412,7 +204,7 @@ type RequestParams = Map.Map Text Text
 -- | Makes the URL for <http://www.imsglobal.org/spec/security/v1p0/#step-1-third-party-initiated-login IMS Security spec § 5.1.1.2>
 --   upon the § 5.1.1.1 request coming in
 --
---   Returns @(Issuer, RedirectURL)@.
+--   Returns @(Issuer, ClientId, RedirectURL)@.
 initiate :: (MonadIO m) => AuthFlowConfig m -> RequestParams -> m (Issuer, ClientId, Text)
 initiate cfg params = do
     -- we don't care about target link uri since we only support one endpoint

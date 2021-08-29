@@ -36,11 +36,15 @@ test-suite spec
 
 library
     exposed-modules:     Web.LTI13
+                       , Web.LTI13.Types
     -- other-modules:
     -- other-extensions:
     default-extensions:
           NamedFieldPuns
+        , TemplateHaskell
         , OverloadedStrings
+        , LambdaCase
+        , DataKinds
         , RecordWildCards
         , DeriveGeneric
 
@@ -54,6 +58,7 @@ library
                        , http-types            >= 0.12.3 && < 0.13
                        , jose-jwt              >= 0.8.0 && < 0.10
                        , oidc-client           >= 0.5.1 && < 0.7
+                       , time                  >= 1.9.3 && < 1.10
                        , safe-exceptions       >= 0.1.7 && < 0.2
     default-language:   Haskell2010
     ghc-options:         -Wall
