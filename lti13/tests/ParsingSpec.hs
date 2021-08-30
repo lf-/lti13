@@ -17,7 +17,7 @@ ltiSpecExample = $(embedFile =<< pathRelativeToCabalPackage "tests/example.json"
 
 specExampleOutput :: UncheckedLtiTokenClaims
 specExampleOutput = UncheckedLtiTokenClaims {
-      messageType = "LtiResourceLinkRequest"
+      messageType = LtiResourceLinkRequest
     , ltiVersion = "1.3.0"
     , deploymentId = "07940580-b309-415e-a37c-914d387c1150"
     , targetLinkUri = "https://tool.example.com/lti/48320/ruix8782rs"
@@ -40,7 +40,10 @@ specExampleOutput = UncheckedLtiTokenClaims {
             , courseSectionSourcedId = Just "example.edu:SI182-001-F16"
             , resultSourcedId = Nothing
         }
-    )}
+    )
+    , tokDlSettings = Nothing
+    , tokAgs = Nothing
+    }
 
 spec :: Spec
 spec = do

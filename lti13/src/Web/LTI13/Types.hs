@@ -1,7 +1,8 @@
 -- | Data model for LTI 1.3
 module Web.LTI13.Types (
+      module Web.LTI13.Claims
       -- * Base
-        Role(..)
+      , Role(..)
       , MessageType(..)
       , LisClaim(..)
       , ContextClaim(..)
@@ -25,19 +26,25 @@ module Web.LTI13.Types (
 
       -- * Assignment and Grade Services
       , AgsClaim(..)
+      , AgsScope(..)
 ) where
-import qualified Control.Monad.Fail as Fail
-import           Data.Aeson         (FromJSON (..), Object, ToJSON (..), object,
-                                     pairs, withObject, withText, (.:), (.:?),
-                                     (.=), constructorTagModifier, fieldLabelModifier)
-import Data.Aeson.TH (deriveJSON, defaultOptions)
-import qualified Data.Aeson         as A
-import           Data.Aeson.Types   (Parser)
-import           Data.Text          (Text)
-import qualified Data.Text          as T
-import           Data.Time          (ZonedTime)
-import           Data.Tuple         (swap)
-import           GHC.Generics       (Generic)
+import qualified Control.Monad.Fail  as Fail
+import           Data.Aeson          (FromJSON (..), Object, ToJSON (..),
+                                      constructorTagModifier,
+                                      fieldLabelModifier, object, pairs,
+                                      withObject, withText, (.:), (.:?), (.=))
+import qualified Data.Aeson          as A
+import           Data.Aeson.TH       (defaultOptions, deriveJSON)
+import           Data.Aeson.Types    (Parser)
+import           Data.Text           (Text)
+import qualified Data.Text           as T
+import           Data.Time           (ZonedTime)
+import           Data.Tuple          (swap)
+import           GHC.Generics        (Generic)
+import           Jose.Jwt            (JwtClaims (..))
+
+import           Web.LTI13.Claims
+import           Web.LTI13.THHelpers
 
 -- | Parses a JSON text field to a fixed expected value, failing otherwise
 parseFixed :: (FromJSON a, Eq a, Show a) => Object -> Text -> a -> Parser a
@@ -114,11 +121,25 @@ data TimeWindow = TimeWindow
     , timeWindowEnd   :: ZonedTime
     }
 
+$(deriveJSON
+    defaultOptions
+        { fieldLabelModifier = \case
+            "timeWindowBegin" -> "startDateTime"
+            "timeWindowEnd"   -> "endDateTime"
+            _                 -> error "missing item"
+        }
+    ''TimeWindow
+    )
+
 -- | Configures an iframe to embed into the provider.
 data Iframe = Iframe
     { iframeWidth  :: Int
     , iframeHeight :: Int
     }
+
+$(deriveJSON
+    defaultOptions { fieldLabelModifier = unPrefix "iframe" }
+    ''Iframe)
 
 -- | Information to provide to create a line item in the gradebook with a deep
 --   linking request.
@@ -135,6 +156,13 @@ data ResourceLinkLineItem = ResourceLinkLineItem
     -- ^ <https://www.imsglobal.org/spec/lti-ags/v2p0/#tag Tag for the line item>.
     }
 
+$(deriveJSON
+    A.defaultOptions
+        {
+            fieldLabelModifier = unPrefix "lineItem"
+        }
+    ''ResourceLinkLineItem
+    )
 
 -- | Information that goes on a @ltiResourceLink@ type item returned in a deep linking response.
 data LtiResourceLinkInfo = LtiResourceLinkInfo
@@ -152,6 +180,14 @@ data LtiResourceLinkInfo = LtiResourceLinkInfo
     -- ^ When the link can take submissions.
     }
 
+$(deriveJSON
+    A.defaultOptions
+        {
+            fieldLabelModifier = unPrefix "rlink"
+        }
+    ''LtiResourceLinkInfo
+    )
+
 -- | Types defined in
 --   <https://www.imsglobal.org/spec/lti-dl/v2p0#content-item-types section 2> of
 --   the Deep Linking spec. See also 'DeepLinkType'.
@@ -159,6 +195,14 @@ newtype DeepLinkContentItem =
     -- FIXME: This is obviously missing most of the types. They should be
     -- added, at some point
     LinkItemLtiResourceLink LtiResourceLinkInfo
+
+$(deriveJSON
+    A.defaultOptions
+        { A.sumEncoding = A.TaggedObject "type" (error "dont do this")
+        , A.constructorTagModifier = error "a"
+        }
+    ''DeepLinkContentItem
+    )
 
 -- | Ways to show content on the platform
 data PresentationTarget =
@@ -169,10 +213,10 @@ data PresentationTarget =
 
 $(deriveJSON (defaultOptions {
     constructorTagModifier = \case
-         "TargetEmbed" -> "embed"
+         "TargetEmbed"  -> "embed"
          "TargetWindow" -> "window"
          "TargetIframe" -> "iframe"
-         _ -> error "oops"
+         v              -> error v
     }) ''PresentationTarget)
 
 -- | Incoming linking settings claim
@@ -200,11 +244,29 @@ $(deriveJSON (defaultOptions {
          v -> error v
     }) ''DeepLinkingSettings)
 
+data DeepLinkingResponseMessage = DeepLinkingResponseMessage
+    { dlrmContent     :: DeepLinkingResponse
+    , dlrmBasicClaims :: JwtClaims
+    }
+
+instance ToJSON DeepLinkingResponseMessage where
+    toJSON DeepLinkingResponseMessage {..} =
+        let A.Object basic = toJSON dlrmBasicClaims
+            A.Object content = toJSON dlrmContent
+        in A.Object $ basic <> content
+
+data MessageType =
+      LtiResourceLinkRequest
+    | LtiDeepLinkingRequest
+    | LtiDeepLinkingResponse
+    deriving (Show, Eq, Generic)
+
+instance FromJSON MessageType
+instance ToJSON MessageType
+
 -- | Response to a deep linking request. This is the content of a JWT.
 data DeepLinkingResponse = DeepLinkingResponse
-    { dlRespAud          :: Text
-    -- ^ URL of the platform (@iss@ on the incoming token)
-    , dlRespMessageType  :: MessageType
+    { dlRespMessageType  :: MessageType
     -- ^ This is 'LtiDeepLinkingResponse'
     , dlRespLtiVersion   :: Text
     -- ^ @"1.3.0"@
@@ -216,6 +278,20 @@ data DeepLinkingResponse = DeepLinkingResponse
     , dlRespContentItems :: [DeepLinkContentItem]
     -- ^ Items that the user selected.
     }
+
+$(deriveJSON
+    defaultOptions
+    {
+        fieldLabelModifier = \case
+            "dlRespMessageType"  -> T.unpack claimMessageType
+            "dlRespLtiVersion"   -> T.unpack claimVersion
+            "dlRespDeploymentId" -> T.unpack claimDeploymentId
+            "dlRespData"         -> T.unpack claimDlData
+            "dlRespContentItems" -> T.unpack claimDlContentItems
+            _                    -> error "missing field"
+    }
+    ''DeepLinkingResponse
+    )
 
 ------------------------------------------------------------
 -- AGS
@@ -263,20 +339,16 @@ data AgsClaim = AgsClaim
     }
     deriving (Show, Eq)
 
-instance FromJSON AgsClaim where
-    parseJSON = withObject "AgsClaim" $ \v ->
-        AgsClaim
-            <$> v .: "scope"
-            <*> v .:? "lineitems"
-            <*> v .:? "lineitem"
-
-instance ToJSON AgsClaim where
-    toJSON AgsClaim {..} =
-        object [
-              "scope" .= agsClaimScope
-            , "lineitems" .= agsClaimLineItemsUrl
-            , "lineitem" .= agsClaimLineItemUrl
-          ]
+$(deriveJSON
+    defaultOptions
+        { fieldLabelModifier = \case
+            "agsClaimScope"        -> "scope"
+            "agsClaimLineItemUrl"  -> "lineitem"
+            "agsClaimLineItemsUrl" -> "lineitems"
+            v                      -> error v
+        }
+    ''AgsClaim
+    )
 
 ------------------------------------------------------------
 -- Base
@@ -327,36 +399,18 @@ data LisClaim = LisClaim
     --   assignment being viewed.
     } deriving (Show, Eq)
 
-instance FromJSON LisClaim where
-    parseJSON = withObject "LisClaim" $ \v ->
-        LisClaim
-            <$> v .:? "person_sourcedid"
-            <*> v .:? "outcome_service_url"
-            <*> v .:? "course_offering_sourcedid"
-            <*> v .:? "course_section_sourcedid"
-            <*> v .:? "result_sourcedid"
-
-instance ToJSON LisClaim where
-    toJSON LisClaim {personSourcedId, outcomeServiceUrl,
-                courseOfferingSourcedId, courseSectionSourcedId,
-                resultSourcedId} =
-        object [
-            "person_sourcedid" .= personSourcedId
-          , "outcome_service_url" .= outcomeServiceUrl
-          , "course_offering_sourcedid" .= courseOfferingSourcedId
-          , "course_section_sourcedid" .= courseSectionSourcedId
-          , "result_sourcedid" .= resultSourcedId
-          ]
-    toEncoding LisClaim {personSourcedId, outcomeServiceUrl,
-                    courseOfferingSourcedId, courseSectionSourcedId,
-                    resultSourcedId} =
-        pairs (
-            "person_sourcedid" .= personSourcedId <>
-            "outcome_service_url" .= outcomeServiceUrl <>
-            "course_offering_sourcedid" .= courseOfferingSourcedId <>
-            "course_section_sourcedid" .= courseSectionSourcedId <>
-            "result_sourcedid" .= resultSourcedId
-        )
+$(deriveJSON
+    defaultOptions
+        { fieldLabelModifier = \case
+            "personSourcedId"         -> "person_sourcedid"
+            "outcomeServiceUrl"       -> "outcome_service_url"
+            "courseOfferingSourcedId" -> "course_offering_sourcedid"
+            "courseSectionSourcedId"  -> "course_section_sourcedid"
+            "resultSourcedId"         -> "result_sourcedid"
+            v                         -> error v
+        }
+    ''LisClaim
+    )
 
 -- | <http://www.imsglobal.org/spec/lti/v1p3/#context-claim LTI spec § 5.4.1> context claim
 data ContextClaim = ContextClaim
@@ -366,35 +420,13 @@ data ContextClaim = ContextClaim
     }
     deriving (Show, Eq)
 
-instance FromJSON ContextClaim where
-    parseJSON = withObject "ContextClaim" $ \v ->
-        ContextClaim
-            <$> (v .: "id" >>= limitLength 255)
-            <*> v .:? "label"
-            <*> v .:? "title"
 
-instance ToJSON ContextClaim where
-    toJSON ContextClaim {contextId, contextLabel, contextTitle} =
-        object [
-            "id" .= contextId
-          , "label" .= contextLabel
-          , "title" .= contextTitle
-          ]
-    toEncoding ContextClaim {contextId, contextLabel, contextTitle} =
-        pairs (
-            "id" .= contextId <>
-            "label" .= contextLabel <>
-            "title" .= contextTitle
-        )
-
-data MessageType =
-      LtiResourceLinkRequest
-    | LtiDeepLinkingRequest
-    | LtiDeepLinkingResponse
-    deriving (Show, Eq, Generic)
-
-instance FromJSON MessageType
-instance ToJSON MessageType
+$(deriveJSON
+    defaultOptions
+    { fieldLabelModifier = unPrefix "context"
+    }
+    ''ContextClaim
+    )
 
 -- | LTI specific claims on a token. You should not accept this type, and
 --   instead prefer the @newtype@ 'LtiTokenClaims' which has had checking
@@ -429,25 +461,6 @@ limitLength len string
     | T.length string <= len
     = return string
 limitLength _ _ = fail "String is too long"
-
-claimMessageType :: Text
-claimMessageType = "https://purl.imsglobal.org/spec/lti/claim/message_type"
-claimVersion :: Text
-claimVersion = "https://purl.imsglobal.org/spec/lti/claim/version"
-claimDeploymentId :: Text
-claimDeploymentId = "https://purl.imsglobal.org/spec/lti/claim/deployment_id"
-claimTargetLinkUri :: Text
-claimTargetLinkUri = "https://purl.imsglobal.org/spec/lti/claim/target_link_uri"
-claimRoles :: Text
-claimRoles = "https://purl.imsglobal.org/spec/lti/claim/roles"
-claimContext :: Text
-claimContext = "https://purl.imsglobal.org/spec/lti/claim/context"
-claimLis :: Text
-claimLis = "https://purl.imsglobal.org/spec/lti/claim/lis"
-claimDlSettings :: Text
-claimDlSettings = "https://purl.imsglobal.org/spec/lti-dl/claim/deep_linking_settings"
-claimAgs :: Text
-claimAgs = "https://purl.imsglobal.org/spec/lti-ags/claim/endpoint"
 
 instance FromJSON UncheckedLtiTokenClaims where
     parseJSON = withObject "LtiTokenClaims" $ \v ->

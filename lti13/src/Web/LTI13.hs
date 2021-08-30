@@ -9,11 +9,7 @@
 --   LTI Reference Implementation> helpful.
 module Web.LTI13 (
       -- * Token contents/data model
-        Role(..)
-      , LisClaim(..)
-      , ContextClaim(..)
-      , UncheckedLtiTokenClaims(..)
-      , LtiTokenClaims(..)
+      module Web.LTI13.Types
 
       -- * Anonymizing tokens for logging
       , AnonymizedLtiTokenClaims(..)
@@ -50,6 +46,7 @@ import qualified Data.Map.Strict                    as Map
 import           Data.Text                          (Text)
 import qualified Data.Text                          as T
 import           Data.Text.Encoding                 (decodeUtf8, encodeUtf8)
+import           Data.Time                          (ZonedTime)
 import           Data.Tuple                         (swap)
 import           GHC.Generics                       (Generic)
 import           Jose.Jwa                           (JwsAlg (RS256))
@@ -58,14 +55,13 @@ import           Network.HTTP.Client                (HttpException, Manager,
                                                      httpLbs, parseRequest,
                                                      responseBody)
 import qualified Network.HTTP.Types.URI             as URI
+import           Web.LTI13.Types
 import qualified Web.OIDC.Client.Discovery.Provider as P
 import           Web.OIDC.Client.IdTokenFlow        (getValidIdTokenClaims)
 import qualified Web.OIDC.Client.Settings           as O
 import           Web.OIDC.Client.Tokens             (IdTokenClaims, aud, iss,
                                                      nonce, otherClaims)
 import           Web.OIDC.Client.Types              (Nonce, SessionStore (..))
-import Web.LTI13.Types
-import Data.Time (ZonedTime)
 
 
 -- | A direct implementation of <http://www.imsglobal.org/spec/security/v1p0/#authentication-response-validation Security § 5.1.3>
@@ -303,6 +299,9 @@ handleAuthResponse mgr cfg params pinfo = do
         Left err  -> liftIO $ throw $ InvalidLtiToken err
         Right tok -> return (state, tok)
 
+
+-- makeJwt :: (ToJSON a) =>
+
 -- | Removes PII of the user from the token, retaining only information about
 --   the system in general or the context.
 --
@@ -323,6 +322,8 @@ anonymizeLtiTokenForLogging UncheckedLtiTokenClaims {..} =
         , context
         , email = anonymized <$> email
         , lis = anonymizedLis <$> lis
+        , tokDlSettings = anonymizedDlSettings <$> tokDlSettings
+        , tokAgs
         }
     where
         anonymized _ = "**"
@@ -338,4 +339,17 @@ anonymizeLtiTokenForLogging UncheckedLtiTokenClaims {..} =
             -- likewise with personSourcedId, we don't know what will be put in
             -- here. it's probably a guid but let's be safe
             , resultSourcedId = anonymized <$> resultSourcedId
+            }
+        anonymizedDlSettings DeepLinkingSettings {..} = DeepLinkingSettings
+            { dlsReturnUrl
+            -- these are probably not personally identifiable but we have no
+            -- idea what's in them and we have no reason to have them for
+            -- debugging purposes
+            , dlsTitle = anonymized <$> dlsTitle
+            , dlsData = anonymized <$> dlsData
+            , dlsAcceptTypes
+            , dlsAutoCreate
+            , dlsAcceptMediaTypes
+            , dlsAcceptMultiple
+            , dlsAcceptPresentationDocumentTargets
             }

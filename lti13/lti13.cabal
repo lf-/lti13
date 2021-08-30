@@ -21,6 +21,8 @@ extra-source-files:  CHANGELOG.md
 test-suite spec
     type:                exitcode-stdio-1.0
     default-language:    Haskell2010
+    other-modules:       AnonSpec
+                       , ParsingSpec
     hs-source-dirs:      tests
     ghc-options:         -Wall
     main-is:             Spec.hs
@@ -37,7 +39,8 @@ test-suite spec
 library
     exposed-modules:     Web.LTI13
                        , Web.LTI13.Types
-    -- other-modules:
+    other-modules:       Web.LTI13.Claims
+                       , Web.LTI13.THHelpers
     -- other-extensions:
     default-extensions:
           NamedFieldPuns
