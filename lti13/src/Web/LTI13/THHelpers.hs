@@ -8,3 +8,10 @@ unPrefix prefix text =
     -- this code is bad on purpose, it will only crash at compile time
     let Just (first:rest) = stripPrefix prefix text
     in toLower first : rest
+
+-- | Remove prefix and keep leading uppercase letter
+unPrefix' :: String -> String -> String
+unPrefix' prefix text =
+    -- this code is bad on purpose, it will only crash at compile time
+    let Just l = stripPrefix prefix text
+    in l

@@ -22,7 +22,7 @@ module Web.LTI13.Types (
 
       -- ** Outgoing (to platform)
       , DeepLinkingResponse(..)
-      , DeepLinkingResponseMessage(..)
+      , JwtWithContent(..)
       , TimeWindow(..)
       , Iframe(..)
       , ResourceLinkLineItem(..)
@@ -30,8 +30,20 @@ module Web.LTI13.Types (
       , DeepLinkContentItem(..)
 
       -- * Assignment and Grade Services
+      , LineItemUrl
+      , UserId
       , AgsClaim(..)
-      , AgsScope(..)
+      , AuthScope(..)
+      , AgsScoreUpdate(..)
+      , AgsScorePair(..)
+      , AgsGradingProgress(..)
+      , AgsActivityProgress(..)
+
+      -- * Auth Tokens
+      , Jti
+      , AccessToken
+      , AuthTokenGrantResp(..)
+      , makeAuthScopesString
 ) where
 import qualified Control.Monad.Fail  as Fail
 import           Data.Aeson          (FromJSON (..), Object, Options (..),
@@ -258,15 +270,15 @@ $(deriveJSON (defaultOptions {
 
 -- | Internal structure for the content of the outgoing deep linking response
 --   JWTs
-data DeepLinkingResponseMessage = DeepLinkingResponseMessage
-    { dlrmContent     :: DeepLinkingResponse
-    , dlrmBasicClaims :: JwtClaims
+data (ToJSON content) => JwtWithContent content = JwtWithContent
+    { jwtContent     :: content
+    , jwtBasicClaims :: JwtClaims
     }
 
-instance ToJSON DeepLinkingResponseMessage where
-    toJSON DeepLinkingResponseMessage {..} =
-        let A.Object basic = toJSON dlrmBasicClaims
-            A.Object content = toJSON dlrmContent
+instance (ToJSON content) => ToJSON (JwtWithContent content) where
+    toJSON JwtWithContent {..} =
+        let A.Object basic = toJSON jwtBasicClaims
+            A.Object content = toJSON jwtContent
         in A.Object $ basic <> content
 
 data MessageType =
@@ -311,8 +323,12 @@ $(deriveJSON
 -- AGS
 ------------------------------------------------------------
 
+type LineItemUrl = Text
+-- | User ID (@sub@) on the incoming token
+type UserId = Text
+
 -- | Permitted scope of access to grades data.
-data AgsScope =
+data AuthScope =
       AgsScopeLineItem
     -- ^ Can enumerate and create/manage line items.
     | AgsScopeLineItemReadOnly
@@ -325,30 +341,30 @@ data AgsScope =
     -- ^ This probably doesn't exist.
     deriving (Eq, Show)
 
-agsScopeToString :: AgsScope -> Text
-agsScopeFromString :: Text -> AgsScope
+agsScopeToString :: AuthScope -> Text
+agsScopeFromString :: Text -> AuthScope
 (agsScopeToString, agsScopeFromString) = mkBijection (unOther, AgsScopeOther) [
-        (AgsScopeLineItem, "https://purl.imsglobal.org/spec/lti-ags/scope/lineitem"),
-        (AgsScopeLineItemReadOnly, "https://purl.imsglobal.org/spec/lti-ags/scope/lineitem.readonly"),
-        (AgsScopeScore, "https://purl.imsglobal.org/spec/lti-ags/scope/score"),
-        (AgsScopeResult, "https://purl.imsglobal.org/spec/lti-ags/scope/result.readonly")
+        (AgsScopeLineItem, scopeAgsLineItem),
+        (AgsScopeLineItemReadOnly, scopeAgsLineItemReadOnly),
+        (AgsScopeScore, scopeAgsScore),
+        (AgsScopeResult, scopeAgsResult)
     ]
     where unOther (AgsScopeOther o) = o
           unOther _                 = error "bug: missing ags scope"
 
-instance FromJSON AgsScope where
+instance FromJSON AuthScope where
     parseJSON = withText "AgsScope" $ return . agsScopeFromString
 
-instance ToJSON AgsScope where
+instance ToJSON AuthScope where
     toJSON = A.String . agsScopeToString
 
 data AgsClaim = AgsClaim
-    { agsClaimScope        :: [AgsScope]
+    { agsClaimScope        :: [AuthScope]
     -- ^ Scopes that the tool has authorization to get a token for.
     , agsClaimLineItemsUrl :: Maybe Text
     -- ^ URL for managing line items, using 'AgsScopeLineItem' or accessing
     --   scores with 'AgsScopeScore'.
-    , agsClaimLineItemUrl  :: Maybe Text
+    , agsClaimLineItemUrl  :: Maybe LineItemUrl
     -- ^ URL for managing the line item for this resource link.
     }
     deriving (Show, Eq)
@@ -363,6 +379,151 @@ $(deriveJSON
         }
     ''AgsClaim
     )
+
+data AgsActivityProgress =
+      ActivityInitialized
+    -- ^ the activity is in an initial state, possibly because the student did
+    --   not start it
+    | ActivityStarted
+    -- ^ the activity has been partially completed but not submitted
+    | ActivityInProgress
+    -- ^ the activity has been partially completed and is "available for
+    --   comment" (?)
+    | ActivitySubmitted
+    -- ^ activity has been submitted, but submissions are still open
+    | ActivityCompleted
+    -- ^ activity has been completed
+
+$(deriveJSON
+    defaultOptions
+        { constructorTagModifier = unPrefix' "Activity"
+        }
+    ''AgsActivityProgress
+    )
+
+data AgsGradingProgress =
+      GradingFullyGraded
+    -- ^ any grade sent is the current final grade
+    | GradingPending
+    -- ^ the grading process is incomplete, and partial grades may be present
+    | GradingPendingManual
+    -- ^ the grading process needs manual intervention
+    | GradingFailed
+    -- ^ the grading process encountered an error
+    | GradingNotReady
+    -- ^ no process occurring, not completed?
+
+$(deriveJSON
+    defaultOptions
+        { constructorTagModifier = unPrefix' "Grading"
+        }
+    ''AgsGradingProgress
+    )
+
+data AgsScorePair = AgsScorePair
+    { scoreGiven   :: Float
+    -- ^ The current score for a student. For semantic information on this
+    --   value, see the
+    --   <https://www.imsglobal.org/spec/lti-ags/v2p0/#scoregiven-and-scoremaximum relevant spec section>
+    --
+    --   If it is absent, the score on the platform is cleared.
+    --
+    --   Requirements:
+    --   * Must be a real number >= 0
+    --   * Can be greater than 'asuScoreMaximum'
+    , scoreMaximum :: Float
+    -- ^ Maximum attainable score on the assignment.
+    --
+    --   Must be present if 'scoreGiven' is present.
+    --
+    --   Need not be the same as the maximum score on the line item, and
+    --   according to the spec will probably be scaled.
+    }
+
+$(deriveJSON defaultOptions ''AgsScorePair)
+
+-- | Score update message to send to the platform.
+--
+--   This overwrites the current state on the platform side, potentially
+--   clearing fields if any fields are 'Nothing', for example.
+data AgsScoreUpdate = AgsScoreUpdate
+    { asuTimestamp        :: ZonedTime
+    -- ^ Timestamp when the score was changed
+    , asuScore            :: Maybe AgsScorePair
+    -- ^ Scores for this student for this assignment.
+    , asuComment          :: Maybe Text
+    -- ^ Comment on the score, to be displayed to both instructors and
+    --   students. Will overwrite the current value on the platform side.
+    , asuActivityProgress :: AgsActivityProgress
+    , asuGradingProgress  :: AgsGradingProgress
+    , asuUserId           :: UserId
+    -- ^ This is the @sub@ on the incoming token
+    }
+
+instance ToJSON AgsScoreUpdate where
+    toJSON AgsScoreUpdate {..} =
+        let A.Object score = toJSON asuScore
+        in A.Object $ HM.fromList
+            [ "timestamp" .= asuTimestamp
+            , "comment" .= asuComment
+            , "activityProgress" .= asuActivityProgress
+            , "gradingProgress" .= asuGradingProgress
+            , "userId" .= asuUserId
+            ] <> score
+
+
+------------------------------------------------------------
+-- Auth token requesting machinery
+------------------------------------------------------------
+
+type Jti = Text
+type AccessToken = Text
+
+data GrantTokenType =
+    GrantBearer
+
+$(deriveJSON
+    defaultOptions
+        { constructorTagModifier = \case
+            "GrantBearer" -> "bearer"
+            v             -> error v
+        }
+    ''GrantTokenType
+    )
+
+data AuthTokenGrantResp = AuthTokenGrantResp
+    { grantAccessToken :: AccessToken
+    , grantTokenType   :: GrantTokenType
+    , grantExpiresIn   :: Int
+    , grantScope       :: [AuthScope]
+    }
+
+parseAuthScopesString :: A.Value -> Parser [AuthScope]
+parseAuthScopesString = withText "AuthScope" $ \v' ->
+    mapM parseJSON (A.String <$> T.split (== ' ') v')
+
+makeAuthScopesString :: [AuthScope] -> Text
+makeAuthScopesString s =
+    let unwrapText (A.String v) = v
+        unwrapText _            = error "AuthTokenGrantResp bug"
+    in T.intercalate " " (unwrapText . toJSON <$> s)
+
+instance FromJSON AuthTokenGrantResp where
+    parseJSON = withObject "AuthTokenGrantResp" $ \v ->
+        AuthTokenGrantResp
+            <$> v .: "access_token"
+            <*> v .: "token_type"
+            <*> v .: "expires_in"
+            <*> parseAuthScopesString (A.Object v)
+
+instance ToJSON AuthTokenGrantResp where
+    toJSON AuthTokenGrantResp {..} =
+        object
+            [ "access_token" .= grantAccessToken
+            , "token_type" .= grantTokenType
+            , "expires_in" .= grantExpiresIn
+            , "scope" .= makeAuthScopesString grantScope
+            ]
 
 ------------------------------------------------------------
 -- Base
@@ -589,3 +750,4 @@ instance ToJSON PlatformGenericClaims where
             <> claimContext .= context
             <> claimLis .= lis
           )
+

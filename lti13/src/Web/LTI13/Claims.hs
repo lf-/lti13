@@ -25,6 +25,15 @@ claimDlData = "https://purl.imsglobal.org/spec/lti-dl/claim/data"
 claimAgs :: Text
 claimAgs = "https://purl.imsglobal.org/spec/lti-ags/claim/endpoint"
 
+scopeAgsLineItem :: Text
+scopeAgsLineItem = "https://purl.imsglobal.org/spec/lti-ags/scope/lineitem"
+scopeAgsLineItemReadOnly :: Text
+scopeAgsLineItemReadOnly = "https://purl.imsglobal.org/spec/lti-ags/scope/lineitem.readonly"
+scopeAgsScore :: Text
+scopeAgsScore = "https://purl.imsglobal.org/spec/lti-ags/scope/score"
+scopeAgsResult :: Text
+scopeAgsResult = "https://purl.imsglobal.org/spec/lti-ags/scope/result.readonly"
+
 myLtiVersion :: Text
 myLtiVersion = "1.3.0"
 
