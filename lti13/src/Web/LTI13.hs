@@ -12,11 +12,10 @@ module Web.LTI13 (
       module Web.LTI13.Types
 
       -- * Anonymizing tokens for logging
-      , AnonymizedLtiTokenClaims(..)
-      , anonymizeLtiTokenForLogging
+      , module Web.LTI13.Anonymize
 
       -- * Validation and auth
-      , validateLtiToken
+      , validatePlatformMessage
       , LTI13Exception(..)
       , PlatformInfo(..)
       , Issuer
@@ -26,6 +25,12 @@ module Web.LTI13 (
       , RequestParams
       , initiate
       , handleAuthResponse
+
+      -- ** Deep Linking
+      , makeDeepLinkingResponse
+
+      -- * Internal
+      , makeJwt
     ) where
 import           Control.Exception.Safe             (Exception, MonadCatch,
                                                      MonadThrow, Typeable,
@@ -33,6 +38,7 @@ import           Control.Exception.Safe             (Exception, MonadCatch,
 import           Control.Monad                      (when, (>=>))
 import qualified Control.Monad.Fail                 as Fail
 import           Control.Monad.IO.Class             (MonadIO, liftIO)
+import           Crypto.Random.Types                (MonadRandom)
 import           Data.Aeson                         (FromJSON (parseJSON),
                                                      Object,
                                                      ToJSON (toEncoding, toJSON),
@@ -42,15 +48,20 @@ import           Data.Aeson                         (FromJSON (parseJSON),
                                                      (.=))
 import qualified Data.Aeson                         as A
 import           Data.Aeson.Types                   (Parser)
+import           Data.ByteString.Lazy               (toStrict)
 import qualified Data.Map.Strict                    as Map
 import           Data.Text                          (Text)
 import qualified Data.Text                          as T
 import           Data.Text.Encoding                 (decodeUtf8, encodeUtf8)
-import           Data.Time                          (ZonedTime)
+import           Data.Time                          (ZonedTime,
+                                                     nominalDiffTimeToSeconds,
+                                                     secondsToNominalDiffTime)
+import           Data.Time.Clock.POSIX              (getPOSIXTime)
 import           Data.Tuple                         (swap)
 import           GHC.Generics                       (Generic)
 import           Jose.Jwa                           (JwsAlg (RS256))
 import qualified Jose.Jwk                           as Jwk
+import qualified Jose.Jwt                           as Jwt
 import           Network.HTTP.Client                (HttpException, Manager,
                                                      httpLbs, parseRequest,
                                                      responseBody)
@@ -62,27 +73,21 @@ import qualified Web.OIDC.Client.Settings           as O
 import           Web.OIDC.Client.Tokens             (IdTokenClaims, aud, iss,
                                                      nonce, otherClaims)
 import           Web.OIDC.Client.Types              (Nonce, SessionStore (..))
+import Web.LTI13.Anonymize
 
 
 -- | A direct implementation of <http://www.imsglobal.org/spec/security/v1p0/#authentication-response-validation Security § 5.1.3>
-validateLtiToken
+validatePlatformMessage
     :: PlatformInfo
-    -> IdTokenClaims UncheckedLtiTokenClaims
-    -> Either Text (IdTokenClaims LtiTokenClaims)
-validateLtiToken pinfo claims =
+    -> IdTokenClaims UncheckedPlatformMessage
+    -> Either Text (IdTokenClaims PlatformMessage)
+validatePlatformMessage pinfo claims =
     valid .
-        (messageTypeIsValid
-         >=> issuerMatches
+        (issuerMatches
          >=> audContainsClientId
          >=> hasNonce) $ claims
     where
         -- step 1 handled before we are called
-        -- Check that this token is actually for a Request rather than a Response
-        messageTypeIsValid c
-            | messageType (otherClaims c) `elem` [LtiResourceLinkRequest, LtiDeepLinkingRequest]
-                = Right claims
-            | otherwise
-                = Left "invalid LTI message type"
         -- step 2
         issuerMatches c
             | iss c == platformIssuer pinfo
@@ -108,11 +113,13 @@ validateLtiToken pinfo claims =
             case nonce c of
                 Just _  -> Right claims
                 Nothing -> Left "nonce missing"
-        valid :: Either Text (IdTokenClaims UncheckedLtiTokenClaims) -> Either Text (IdTokenClaims LtiTokenClaims)
+        valid
+            :: Either Text (IdTokenClaims UncheckedPlatformMessage)
+            -> Either Text (IdTokenClaims PlatformMessage)
         -- unwrap a validated token and rewrap it as a valid token
         valid (Left e) = Left e
         valid (Right tok) =
-            Right tok { otherClaims = LtiTokenClaims $ otherClaims tok }
+            Right tok { otherClaims = PlatformMessage $ otherClaims tok }
 
 
 -----------------------------------------------------------
@@ -275,7 +282,7 @@ handleAuthResponse :: (MonadIO m)
     -> AuthFlowConfig m
     -> RequestParams
     -> PlatformInfo
-    -> m (Text, IdTokenClaims LtiTokenClaims)
+    -> m (Text, IdTokenClaims PlatformMessage)
 handleAuthResponse mgr cfg params pinfo = do
     params' <- liftIO $ mapM (`lookupOrThrow` params) ["state", "id_token"]
     let [state, idToken] = params'
@@ -295,61 +302,52 @@ handleAuthResponse mgr cfg params pinfo = do
         Nothing -> liftIO $ throw $ InvalidLtiToken "missing nonce"
     when nonceSeen (liftIO $ throw $ InvalidLtiToken "nonce seen before")
 
-    case validateLtiToken pinfo toCheck of
+    case validatePlatformMessage pinfo toCheck of
         Left err  -> liftIO $ throw $ InvalidLtiToken err
         Right tok -> return (state, tok)
 
-
--- makeJwt :: (ToJSON a) =>
-
--- | Removes PII of the user from the token, retaining only information about
---   the system in general or the context.
+-- | Encodes a RS256 JWT from the given ToJSON message.
 --
---   Fields that are 'Maybe' are kept as 'Maybe', with the contents replaced
---   with @"**"@ if they were 'Just' and otherwise kept as 'Nothing'.
-anonymizeLtiTokenForLogging :: UncheckedLtiTokenClaims -> AnonymizedLtiTokenClaims
-anonymizeLtiTokenForLogging UncheckedLtiTokenClaims {..} =
-    AnonymizedLtiTokenClaims $ UncheckedLtiTokenClaims
-        { messageType
-        , ltiVersion
-        , deploymentId
-        -- this should not identify the user; it is at most a class item
-        , targetLinkUri
-        , roles
-        , displayName = anonymized <$> displayName
-        , firstName = anonymized <$> firstName
-        , lastName = anonymized <$> lastName
-        , context
-        , email = anonymized <$> email
-        , lis = anonymizedLis <$> lis
-        , tokDlSettings = anonymizedDlSettings <$> tokDlSettings
-        , tokAgs
-        }
-    where
-        anonymized _ = "**"
-        anonymizedLis LisClaim {..} = LisClaim
-            -- we really don't know what they will put in this; it might be
-            -- student specific
-            { personSourcedId = anonymized <$> personSourcedId
-            -- spec strongly suggests this be the same across launches ie only
-            -- identifies the context
-            , outcomeServiceUrl
-            , courseOfferingSourcedId
-            , courseSectionSourcedId
-            -- likewise with personSourcedId, we don't know what will be put in
-            -- here. it's probably a guid but let's be safe
-            , resultSourcedId = anonymized <$> resultSourcedId
+--   This message must have the basic claims in it already, e.g.
+--   'DeepLinkingResponseMessage' rather than 'DeepLinkingResponse'.
+makeJwt
+    :: (MonadRandom m, ToJSON content)
+    => [Jwk.Jwk]
+    -> content
+    -> m (Either Jwt.JwtError Jwt.Jwt)
+makeJwt keys value =
+    let encoded = toStrict $ A.encode value
+        enc = Jwt.JwsEncoding RS256
+        content = Jwt.Claims encoded
+    in Jwt.encode keys enc content
+
+-- | Makes a <https://www.imsglobal.org/spec/security/v1p0/#tool-originating-messages tool to platform message>
+--   of deep linking data.
+--
+--   It will expire 15 minutes after running this.
+makeDeepLinkingResponse
+    :: (MonadRandom m, MonadIO m)
+    => [Jwk.Jwk]
+    -> PlatformInfo
+    -> DeepLinkingResponse
+    -> m (Either Jwt.JwtError Jwt.Jwt)
+makeDeepLinkingResponse
+        keys
+        PlatformInfo { platformClientId, platformIssuer }
+        dlResponse = do
+    timeNow <- liftIO getPOSIXTime
+    let minute = secondsToNominalDiffTime 60
+        expInterval = 15 * minute
+        now = Jwt.IntDate timeNow
+        expTime = Jwt.IntDate $ timeNow + expInterval
+        basicClaims = Jwt.JwtClaims
+            { jwtIss = Just platformClientId
+            , jwtAud = Just [platformIssuer]
+            , jwtExp = Just expTime
+            , jwtIat = Just now
+            , jwtNbf = Nothing
+            , jwtSub = Nothing
+            , jwtJti = Nothing
             }
-        anonymizedDlSettings DeepLinkingSettings {..} = DeepLinkingSettings
-            { dlsReturnUrl
-            -- these are probably not personally identifiable but we have no
-            -- idea what's in them and we have no reason to have them for
-            -- debugging purposes
-            , dlsTitle = anonymized <$> dlsTitle
-            , dlsData = anonymized <$> dlsData
-            , dlsAcceptTypes
-            , dlsAutoCreate
-            , dlsAcceptMediaTypes
-            , dlsAcceptMultiple
-            , dlsAcceptPresentationDocumentTargets
-            }
+    makeJwt keys (DeepLinkingResponseMessage dlResponse basicClaims)
+

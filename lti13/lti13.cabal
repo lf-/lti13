@@ -34,11 +34,13 @@ test-suite spec
                        , text
                        , bytestring
                        , aeson
+                       , unordered-containers
                        , lti13
 
 library
     exposed-modules:     Web.LTI13
                        , Web.LTI13.Types
+                       , Web.LTI13.Anonymize
     other-modules:       Web.LTI13.Claims
                        , Web.LTI13.THHelpers
     -- other-extensions:
@@ -56,11 +58,13 @@ library
                        , base                  >= 4.12.0 && < 5
                        , bytestring            >= 0.10.10 && < 0.11
                        , containers            >= 0.6.2 && < 0.7
+                       , cryptonite            >= 0.29 && < 0.30
                        , text                  >= 1.2.4 && < 1.3
                        , http-client           >= 0.6.4 && < 0.7
                        , http-types            >= 0.12.3 && < 0.13
                        , jose-jwt              >= 0.8.0 && < 0.10
                        , oidc-client           >= 0.5.1 && < 0.7
+                       , unordered-containers  >= 0.2.14 && < 0.3
                        , time                  >= 1.9.3 && < 1.10
                        , safe-exceptions       >= 0.1.7 && < 0.2
     default-language:   Haskell2010

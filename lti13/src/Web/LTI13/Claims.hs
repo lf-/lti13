@@ -1,3 +1,4 @@
+-- | Constant strings for various PURLs
 module Web.LTI13.Claims where
 import           Data.Text (Text)
 
@@ -23,4 +24,7 @@ claimDlData :: Text
 claimDlData = "https://purl.imsglobal.org/spec/lti-dl/claim/data"
 claimAgs :: Text
 claimAgs = "https://purl.imsglobal.org/spec/lti-ags/claim/endpoint"
+
+myLtiVersion :: Text
+myLtiVersion = "1.3.0"
 

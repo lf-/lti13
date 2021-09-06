@@ -2,13 +2,17 @@
 module Web.LTI13.Types (
       module Web.LTI13.Claims
       -- * Base
+      , PlatformMessage(..)
+      , UncheckedPlatformMessage(..)
+      , AnonymizedPlatformMessage(..)
+      , PlatformGenericClaims(..)
+      , PlatformTypeSpecificClaims(..)
+      , ResourceLinkRequestClaims(..)
+      , DeepLinkRequestClaims(..)
       , Role(..)
       , MessageType(..)
       , LisClaim(..)
       , ContextClaim(..)
-      , UncheckedLtiTokenClaims(..)
-      , LtiTokenClaims(..)
-      , AnonymizedLtiTokenClaims(..)
 
       -- * Deep Linking
       -- ** Incoming (to tool)
@@ -18,6 +22,7 @@ module Web.LTI13.Types (
 
       -- ** Outgoing (to platform)
       , DeepLinkingResponse(..)
+      , DeepLinkingResponseMessage(..)
       , TimeWindow(..)
       , Iframe(..)
       , ResourceLinkLineItem(..)
@@ -29,13 +34,13 @@ module Web.LTI13.Types (
       , AgsScope(..)
 ) where
 import qualified Control.Monad.Fail  as Fail
-import           Data.Aeson          (FromJSON (..), Object, ToJSON (..),
-                                      constructorTagModifier,
-                                      fieldLabelModifier, object, pairs,
-                                      withObject, withText, (.:), (.:?), (.=))
+import           Data.Aeson          (FromJSON (..), Object, Options (..),
+                                      ToJSON (..), object, pairs, withObject,
+                                      withText, (.:), (.:?), (.=))
 import qualified Data.Aeson          as A
 import           Data.Aeson.TH       (defaultOptions, deriveJSON)
 import           Data.Aeson.Types    (Parser)
+import qualified Data.HashMap.Strict as HM
 import           Data.Text           (Text)
 import qualified Data.Text           as T
 import           Data.Time           (ZonedTime)
@@ -191,18 +196,25 @@ $(deriveJSON
 -- | Types defined in
 --   <https://www.imsglobal.org/spec/lti-dl/v2p0#content-item-types section 2> of
 --   the Deep Linking spec. See also 'DeepLinkType'.
-newtype DeepLinkContentItem =
+data DeepLinkContentItem =
     -- FIXME: This is obviously missing most of the types. They should be
     -- added, at some point
     LinkItemLtiResourceLink LtiResourceLinkInfo
+    | LinkItemOther A.Object
+    -- ^ Just the entire JSON object of an unrecognized type
 
-$(deriveJSON
-    A.defaultOptions
-        { A.sumEncoding = A.TaggedObject "type" (error "dont do this")
-        , A.constructorTagModifier = error "a"
-        }
-    ''DeepLinkContentItem
-    )
+instance FromJSON DeepLinkContentItem where
+    parseJSON = withObject "DeepLinkContentItem" $ \val -> do
+        tag <- val .: "type"
+        case tag of
+            LinkTypeLtiResourceLink -> LinkItemLtiResourceLink <$> A.parseJSON (A.Object val)
+            _ -> return $ LinkItemOther val
+
+instance ToJSON DeepLinkContentItem where
+    toJSON (LinkItemLtiResourceLink v) =
+        let A.Object val = toJSON v
+        in A.Object (val <> HM.fromList ["type" .= LinkTypeLtiResourceLink])
+    toJSON (LinkItemOther v) = A.Object v
 
 -- | Ways to show content on the platform
 data PresentationTarget =
@@ -244,6 +256,8 @@ $(deriveJSON (defaultOptions {
          v -> error v
     }) ''DeepLinkingSettings)
 
+-- | Internal structure for the content of the outgoing deep linking response
+--   JWTs
 data DeepLinkingResponseMessage = DeepLinkingResponseMessage
     { dlrmContent     :: DeepLinkingResponse
     , dlrmBasicClaims :: JwtClaims
@@ -428,32 +442,101 @@ $(deriveJSON
     ''ContextClaim
     )
 
--- | LTI specific claims on a token. You should not accept this type, and
---   instead prefer the @newtype@ 'LtiTokenClaims' which has had checking
---   performed on it.
-data UncheckedLtiTokenClaims = UncheckedLtiTokenClaims
-    { messageType   :: MessageType
-    , ltiVersion    :: Text
-    , deploymentId  :: Text
-    , targetLinkUri :: Text
-    , roles         :: [Role]
-    , email         :: Maybe Text
-    , displayName   :: Maybe Text
-    , firstName     :: Maybe Text
-    , lastName      :: Maybe Text
-    , context       :: Maybe ContextClaim
-    , lis           :: Maybe LisClaim
-    , tokDlSettings :: Maybe DeepLinkingSettings
-    , tokAgs        :: Maybe AgsClaim
+-- | Claims that appear on both 'LtiDeepLinkingRequest' and
+--   'LtiResourceLinkRequest' messages.
+data PlatformGenericClaims = PlatformGenericClaims
+    { ltiVersion   :: Text
+    , deploymentId :: Text
+    , roles        :: [Role]
+    , email        :: Maybe Text
+    , displayName  :: Maybe Text
+    , firstName    :: Maybe Text
+    , lastName     :: Maybe Text
+    , context      :: Maybe ContextClaim
+    , lis          :: Maybe LisClaim
     } deriving (Show, Eq)
+
+data ResourceLinkRequestClaims = ResourceLinkRequestClaims
+    { rlTargetLinkUri :: Text
+    , rlAgs           :: Maybe AgsClaim
+    } deriving (Show, Eq)
+
+$(deriveJSON
+    defaultOptions
+        { fieldLabelModifier = \case
+            "rlTargetLinkUri" -> T.unpack claimTargetLinkUri
+            "rlAgs"           -> T.unpack claimAgs
+            v                 -> error v
+        }
+    ''ResourceLinkRequestClaims
+    )
+
+newtype DeepLinkRequestClaims = DeepLinkRequestClaims
+    { dlSettings :: Maybe DeepLinkingSettings
+    } deriving (Show, Eq)
+
+$(deriveJSON
+    defaultOptions
+        { fieldLabelModifier = \case
+            "dlSettings" -> T.unpack claimDlSettings
+            v            -> error v
+        }
+    ''DeepLinkRequestClaims
+    )
+
+
+-- | LTI specific claims on a token. Be careful while accepting this type: it
+--   does not guarantee the token was checked for validity. In general, prefer
+--   the @newtype@ 'LtiTokenClaims' that checking has been performed on.
+data UncheckedPlatformMessage = UncheckedPlatformMessage
+    { platformGenericClaims      :: PlatformGenericClaims
+    , platformTypeSpecificClaims :: PlatformTypeSpecificClaims
+    } deriving (Show, Eq)
+
+instance FromJSON UncheckedPlatformMessage where
+    parseJSON = withObject "PlatformMesage" $ \v -> do
+        genericClaims <- parseJSON (A.Object v)
+        specificClaims <- parseJSON (A.Object v)
+        return UncheckedPlatformMessage
+            { platformGenericClaims = genericClaims
+            , platformTypeSpecificClaims = specificClaims
+            }
+
+instance ToJSON UncheckedPlatformMessage where
+    toJSON UncheckedPlatformMessage {..} =
+        let A.Object genericClaims = toJSON platformGenericClaims
+            A.Object specificClaims = toJSON platformTypeSpecificClaims
+        in A.Object $ genericClaims <> specificClaims
+
+data PlatformTypeSpecificClaims =
+      ClaimsResourceLink ResourceLinkRequestClaims
+    | ClaimsDeepLink DeepLinkRequestClaims
+    deriving (Show, Eq)
+
+-- This can't be derived because of https://github.com/haskell/aeson/pull/828
+instance FromJSON PlatformTypeSpecificClaims where
+    parseJSON = withObject "PlatformTypeSpecificClaims" $ \val -> do
+        tag <- val .: claimMessageType
+        case tag of
+            LtiResourceLinkRequest -> ClaimsResourceLink <$> A.parseJSON (A.Object val)
+            LtiDeepLinkingRequest -> ClaimsDeepLink <$> A.parseJSON (A.Object val)
+            v -> fail $ "PlatformMessageType was not a Platform message: " <> show v
+
+instance ToJSON PlatformTypeSpecificClaims where
+    toJSON (ClaimsResourceLink v) =
+        let A.Object val = toJSON v
+        in A.Object (val <> HM.fromList [claimMessageType .= LtiResourceLinkRequest])
+    toJSON (ClaimsDeepLink v) =
+        let A.Object val = toJSON v
+        in A.Object (val <> HM.fromList [claimMessageType .= LtiDeepLinkingRequest])
 
 -- | An object representing in the type system a token whose claims have been
 --   validated.
-newtype LtiTokenClaims = LtiTokenClaims { unLtiTokenClaims :: UncheckedLtiTokenClaims }
+newtype PlatformMessage = PlatformMessage { unPlatformMessage :: UncheckedPlatformMessage }
     deriving (Show, Eq)
 
 -- | LTI token claims from which all student data has been removed. For logging.
-newtype AnonymizedLtiTokenClaims = AnonymizedLtiTokenClaims UncheckedLtiTokenClaims
+newtype AnonymizedPlatformMessage = AnonymizedPlatformMessage UncheckedPlatformMessage
     deriving (Show, Eq)
 
 limitLength :: (Fail.MonadFail m) => Int -> Text -> m Text
@@ -462,14 +545,11 @@ limitLength len string
     = return string
 limitLength _ _ = fail "String is too long"
 
-instance FromJSON UncheckedLtiTokenClaims where
-    parseJSON = withObject "LtiTokenClaims" $ \v ->
-        UncheckedLtiTokenClaims
-            -- FIXME: this validation probably should be elsewhere?
-            <$> parseFixedAny v claimMessageType [LtiResourceLinkRequest, LtiDeepLinkingRequest]
-            <*> parseFixed v claimVersion "1.3.0"
+instance FromJSON PlatformGenericClaims where
+    parseJSON = withObject "PlatformGenericClaims" $ \v ->
+        PlatformGenericClaims
+            <$> parseFixed v claimVersion myLtiVersion
             <*> (v .: claimDeploymentId >>= limitLength 255)
-            <*> v .: claimTargetLinkUri
             <*> v .: claimRoles
             <*> v .:? "email"
             <*> v .:? "name"
@@ -477,19 +557,15 @@ instance FromJSON UncheckedLtiTokenClaims where
             <*> v .:? "family_name"
             <*> v .:? claimContext
             <*> v .:? claimLis
-            <*> v .:? claimDlSettings
-            <*> v .:? claimAgs
 
-instance ToJSON UncheckedLtiTokenClaims where
-    toJSON UncheckedLtiTokenClaims {
-              messageType, ltiVersion, deploymentId
-            , targetLinkUri, roles, email, displayName
-            , firstName, lastName, context, lis, tokDlSettings, tokAgs} =
+instance ToJSON PlatformGenericClaims where
+    toJSON PlatformGenericClaims {
+              ltiVersion, deploymentId
+            , roles, email, displayName
+            , firstName, lastName, context, lis} =
         object [
-              claimMessageType .= messageType
-            , claimVersion .= ltiVersion
+              claimVersion .= ltiVersion
             , claimDeploymentId .= deploymentId
-            , claimTargetLinkUri .= targetLinkUri
             , claimRoles .= roles
             , "email" .= email
             , "name" .= displayName
@@ -497,18 +573,14 @@ instance ToJSON UncheckedLtiTokenClaims where
             , "family_name" .= lastName
             , claimContext .= context
             , claimLis .= lis
-            , claimDlSettings .= tokDlSettings
-            , claimAgs .= tokAgs
           ]
-    toEncoding UncheckedLtiTokenClaims {
-              messageType, ltiVersion, deploymentId
-            , targetLinkUri, roles, email, displayName
-            , firstName, lastName, context, lis, tokDlSettings, tokAgs} =
+    toEncoding PlatformGenericClaims {
+              ltiVersion, deploymentId
+            , roles, email, displayName
+            , firstName, lastName, context, lis} =
         pairs (
-               claimMessageType .= messageType
-            <> claimVersion .= ltiVersion
+            claimVersion .= ltiVersion
             <> claimDeploymentId .= deploymentId
-            <> claimTargetLinkUri .= targetLinkUri
             <> claimRoles .= roles
             <> "email" .= email
             <> "name" .= displayName
@@ -516,6 +588,4 @@ instance ToJSON UncheckedLtiTokenClaims where
             <> "family_name" .= lastName
             <> claimContext .= context
             <> claimLis .= lis
-            <> claimDlSettings .= tokDlSettings
-            <> claimAgs .= tokAgs
           )
