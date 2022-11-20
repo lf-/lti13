@@ -46,6 +46,7 @@ import           Data.Aeson                         (FromJSON (parseJSON),
 import qualified Data.Aeson                         as A
 import           Data.Aeson.Types                   (Parser)
 import qualified Data.Map.Strict                    as Map
+import           Data.String                        (IsString)
 import           Data.Text                          (Text)
 import qualified Data.Text                          as T
 import           Data.Text.Encoding                 (decodeUtf8, encodeUtf8)
@@ -63,7 +64,7 @@ import           Web.OIDC.Client.Tokens             (IdTokenClaims, aud, iss,
 import           Web.OIDC.Client.Types              (Nonce, SessionStore (..))
 
 -- | Parses a JSON text field to a fixed expected value, failing otherwise
-parseFixed :: (FromJSON a, Eq a, Show a) => Object -> Text -> a -> Parser a
+parseFixed :: (FromJSON a, Eq a, Show a) => Object -> A.Key -> a -> Parser a
 parseFixed obj field fixedVal =
     obj .: field >>= \v ->
         if v == fixedVal then
@@ -217,19 +218,19 @@ limitLength len string
     = return string
 limitLength _ _ = fail "String is too long"
 
-claimMessageType :: Text
+claimMessageType :: IsString t => t
 claimMessageType = "https://purl.imsglobal.org/spec/lti/claim/message_type"
-claimVersion :: Text
+claimVersion :: IsString t => t
 claimVersion = "https://purl.imsglobal.org/spec/lti/claim/version"
-claimDeploymentId :: Text
+claimDeploymentId :: IsString t => t
 claimDeploymentId = "https://purl.imsglobal.org/spec/lti/claim/deployment_id"
-claimTargetLinkUri :: Text
+claimTargetLinkUri :: IsString t => t
 claimTargetLinkUri = "https://purl.imsglobal.org/spec/lti/claim/target_link_uri"
-claimRoles :: Text
+claimRoles :: IsString t => t
 claimRoles = "https://purl.imsglobal.org/spec/lti/claim/roles"
-claimContext :: Text
+claimContext :: IsString t => t
 claimContext = "https://purl.imsglobal.org/spec/lti/claim/context"
-claimLis :: Text
+claimLis :: IsString t => t
 claimLis = "https://purl.imsglobal.org/spec/lti/claim/lis"
 
 instance FromJSON UncheckedLtiTokenClaims where
@@ -416,9 +417,10 @@ type RequestParams = Map.Map Text Text
 initiate :: (MonadIO m) => AuthFlowConfig m -> RequestParams -> m (Issuer, ClientId, Text)
 initiate cfg params = do
     -- we don't care about target link uri since we only support one endpoint
-    res <- liftIO $ mapM (`lookupOrThrow` params) ["iss", "login_hint", "target_link_uri"]
-    -- not actually fallible
-    let [iss, loginHint, _] = res
+    iss <- liftIO $ lookupOrThrow "iss" params
+    loginHint <- liftIO $ lookupOrThrow "login_hint" params
+    _targetLinkUri <- liftIO $ lookupOrThrow "target_link_uri" params
+
     let messageHint = Map.lookup "lti_message_hint" params
     -- "This allows for a platform to support multiple registrations from a
     -- single issuer, without relying on the initiate_login_uri as a key."
@@ -489,8 +491,8 @@ handleAuthResponse :: (MonadIO m)
     -> PlatformInfo
     -> m (Text, IdTokenClaims LtiTokenClaims)
 handleAuthResponse mgr cfg params pinfo = do
-    params' <- liftIO $ mapM (`lookupOrThrow` params) ["state", "id_token"]
-    let [state, idToken] = params'
+    state <- liftIO $ lookupOrThrow "state" params
+    idToken <- liftIO $ lookupOrThrow "id_token" params
 
     let PlatformInfo { jwksUrl } = pinfo
     jwkSet <- liftIO $ getJwkSet mgr jwksUrl

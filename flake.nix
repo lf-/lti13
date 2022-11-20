@@ -35,11 +35,7 @@
         {
           packages = rec {
             default = lti13;
-            inherit (pkgs.haskell.packages.${ghcVer}) lti13;
-          };
-
-          checks = {
-            inherit (self.packages.${system}) lti13;
+            inherit (pkgs.haskell.packages.${ghcVer}) lti13 yesod-auth-lti13;
           };
 
           # for debugging
@@ -49,11 +45,10 @@
             let haskellPackages = pkgs.haskell.packages.${ghcVer};
             in
             haskellPackages.shellFor {
-              packages = p: [ self.packages.${system}.lti13 ];
+              packages = p: with self.packages.${system}; [ lti13 yesod-auth-lti13 ];
               withHoogle = true;
               buildInputs = with haskellPackages; [
                 haskell-language-server
-                brittany
                 cabal-install
               ] ++ (with pkgs; [
               ]);
