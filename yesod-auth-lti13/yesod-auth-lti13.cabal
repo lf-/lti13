@@ -65,7 +65,6 @@ library
       NumericUnderscores
       OverloadedLabels
       OverloadedStrings
-      OverloadedRecordDot
       PartialTypeSignatures
       PatternSynonyms
       PolyKinds
@@ -137,7 +136,6 @@ executable yesod-lti13-example
       NumericUnderscores
       OverloadedLabels
       OverloadedStrings
-      OverloadedRecordDot
       PartialTypeSignatures
       PatternSynonyms
       PolyKinds
@@ -214,7 +212,6 @@ test-suite spec
       NumericUnderscores
       OverloadedLabels
       OverloadedStrings
-      OverloadedRecordDot
       PartialTypeSignatures
       PatternSynonyms
       PolyKinds

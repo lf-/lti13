@@ -44,7 +44,6 @@ default-extensions:
   - NumericUnderscores
   - OverloadedLabels
   - OverloadedStrings
-  - OverloadedRecordDot
   - PartialTypeSignatures
   - PatternSynonyms
   - PolyKinds
