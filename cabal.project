@@ -1,2 +1,3 @@
 packages: ./lti13
           ./yesod-auth-lti13
+allow-newer: oidc-client:text, jose-jwt:aeson

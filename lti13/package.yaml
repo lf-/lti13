@@ -36,7 +36,7 @@ dependencies:
     - http-client     >= 0.6.4 && < 0.8
     - http-types      >= 0.12.3 && < 0.13
     - jose-jwt        >= 0.8.0 && < 0.10
-    - oidc-client     >= 0.5.1 && < 0.7
+    - oidc-client     >= 0.5.1 && < 0.8
     - safe-exceptions >= 0.1.7 && < 0.2
 
 # from https://medium.com/mercury-bank/enable-all-the-warnings-a0517bc081c3

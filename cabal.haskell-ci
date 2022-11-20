@@ -1,0 +1,4 @@
+-- HI! If you add something in here, make sure to copy it to cabal.project if
+-- needed!
+raw-project
+  allow-newer: oidc-client:text, jose-jwt:aeson

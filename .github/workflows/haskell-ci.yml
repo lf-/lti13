@@ -159,6 +159,9 @@ jobs:
           echo "package yesod-auth-lti13" >> cabal.project
           echo "    ghc-options: -Werror=missing-methods" >> cabal.project
           cat >> cabal.project <<EOF
+          allow-newer: oidc-client:text
+          allow-newer: jose-jwt:aeson
+          allow-newer: oidc-client:text, jose-jwt:aeson
           EOF
           $HCPKG list --simple-output --names-only | perl -ne 'for (split /\s+/) { print "constraints: $_ installed\n" unless /^(lti13|yesod-auth-lti13)$/; }' >> cabal.project.local
           cat cabal.project
