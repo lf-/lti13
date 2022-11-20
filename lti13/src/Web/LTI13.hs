@@ -31,7 +31,7 @@ module Web.LTI13 (
       , handleAuthResponse
     ) where
 import           Control.Exception.Safe             (Exception, MonadCatch,
-                                                     MonadThrow, Typeable,
+                                                     MonadThrow,
                                                      catch, throw, throwM)
 import           Control.Monad                      (when, (>=>))
 import qualified Control.Monad.Fail                 as Fail
@@ -56,6 +56,7 @@ import           Network.HTTP.Client                (HttpException, Manager,
                                                      httpLbs, parseRequest,
                                                      responseBody)
 import qualified Network.HTTP.Types.URI             as URI
+import           Prelude
 import qualified Web.OIDC.Client.Discovery.Provider as P
 import           Web.OIDC.Client.IdTokenFlow        (getValidIdTokenClaims)
 import qualified Web.OIDC.Client.Settings           as O
@@ -82,7 +83,7 @@ data Role = Administrator
           | Learner
           | Mentor
           | Other Text
-          deriving (Show, Eq)
+          deriving stock (Show, Eq)
 
 roleFromString :: Text -> Role
 roleFromString "http://purl.imsglobal.org/vocab/lis/v2/membership#Administrator"
@@ -124,7 +125,7 @@ data LisClaim = LisClaim
     , resultSourcedId         :: Maybe Text
     -- ^ An identifier for the position in the gradebook associated with the
     --   assignment being viewed.
-    } deriving (Show, Eq)
+    } deriving stock (Show, Eq)
 
 instance FromJSON LisClaim where
     parseJSON = withObject "LisClaim" $ \v ->
@@ -163,7 +164,7 @@ data ContextClaim = ContextClaim
     , contextLabel :: Maybe Text
     , contextTitle :: Maybe Text
     }
-    deriving (Show, Eq)
+    deriving stock (Show, Eq)
 
 instance FromJSON ContextClaim where
     parseJSON = withObject "ContextClaim" $ \v ->
@@ -201,16 +202,16 @@ data UncheckedLtiTokenClaims = UncheckedLtiTokenClaims
     , lastName      :: Maybe Text
     , context       :: Maybe ContextClaim
     , lis           :: Maybe LisClaim
-    } deriving (Show, Eq)
+    } deriving stock (Show, Eq)
 
 -- | An object representing in the type system a token whose claims have been
 --   validated.
 newtype LtiTokenClaims = LtiTokenClaims { unLtiTokenClaims :: UncheckedLtiTokenClaims }
-    deriving (Show, Eq)
+    deriving stock (Show, Eq)
 
 -- | LTI token claims from which all student data has been removed. For logging.
 newtype AnonymizedLtiTokenClaims = AnonymizedLtiTokenClaims UncheckedLtiTokenClaims
-    deriving (Show, Eq)
+    deriving stock (Show, Eq)
 
 limitLength :: (Fail.MonadFail m) => Int -> Text -> m Text
 limitLength len string
@@ -342,7 +343,7 @@ data LTI13Exception
     | InvalidLtiToken Text
     -- ^ Token validation error. Per <http://www.imsglobal.org/spec/security/v1p0/#authentication-response-validation Security § 5.1.3>
     --   if you get this, you should return a 401.
-    deriving (Show, Typeable)
+    deriving stock (Show)
 instance Exception LTI13Exception
 
 -- | @client_id@, one or more per platform; <https://www.imsglobal.org/spec/lti/v1p3/#tool-deployment LTI spec § 3.1.3>

@@ -16,6 +16,8 @@ maintainer:     Jade Lovelace <software at lfcode dot ca>
 license:        LGPL-3
 license-file:   LICENSE
 build-type:     Simple
+tested-with:
+    GHC ==8.10.7 || ==9.2.5 || ==9.4.3
 extra-source-files:
     CHANGELOG.md
     README.md
@@ -36,6 +38,7 @@ library
       NamedFieldPuns
       OverloadedStrings
       RecordWildCards
+      DerivingStrategies
       DeriveGeneric
   ghc-options: -Weverything -Wno-missing-exported-signatures -Wno-missing-export-lists -Wno-missing-import-lists -Wno-missed-specialisations -Wno-all-missed-specialisations -Wno-unsafe -Wno-missing-local-signatures -Wno-monomorphism-restriction -Wno-missing-safe-haskell-mode -Wno-prepositive-qualified-module -Wno-unused-packages -Wno-missing-kind-signatures
   build-depends:
@@ -64,6 +67,7 @@ test-suite spec
       NamedFieldPuns
       OverloadedStrings
       RecordWildCards
+      DerivingStrategies
       DeriveGeneric
   ghc-options: -Weverything -Wno-missing-exported-signatures -Wno-missing-export-lists -Wno-missing-import-lists -Wno-missed-specialisations -Wno-all-missed-specialisations -Wno-unsafe -Wno-missing-local-signatures -Wno-monomorphism-restriction -Wno-missing-safe-haskell-mode -Wno-prepositive-qualified-module -Wno-unused-packages -Wno-missing-kind-signatures
   build-depends:

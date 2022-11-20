@@ -52,7 +52,6 @@
                 cabal-install
               ] ++ (with pkgs; [
                 hpack
-                haskell-ci
               ]);
               # Change the prompt to show that you are in a devShell
               # shellHook = "export PS1='\\e[1;34mdev > \\e[0m'";
@@ -62,15 +61,16 @@
     flake-utils.lib.eachDefaultSystem out // {
       # this stuff is *not* per-system
       overlays = {
-        default = makeHaskellOverlay (prev: hfinal: hprev:
-          let hlib = prev.haskell.lib; in
-          {
-            lti13 = hprev.callCabal2nix "lti13" ./lti13 { };
-            yesod-auth-lti13 = hprev.callCabal2nix "yesod-auth-lti13" ./yesod-auth-lti13 { };
+        default = makeHaskellOverlay
+          (prev: hfinal: hprev:
+            let hlib = prev.haskell.lib; in
+            {
+              lti13 = hprev.callCabal2nix "lti13" ./lti13 { };
+              yesod-auth-lti13 = hprev.callCabal2nix "yesod-auth-lti13" ./yesod-auth-lti13 { };
 
-            # For some reason the test suite hangs.
-            ListLike = hlib.dontCheck hprev.ListLike;
-          });
+              # For some reason the test suite hangs.
+              ListLike = hlib.dontCheck hprev.ListLike;
+            });
       };
     };
 }

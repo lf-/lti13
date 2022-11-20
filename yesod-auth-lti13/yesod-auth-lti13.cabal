@@ -16,6 +16,8 @@ maintainer:     Jade Lovelace <software at lfcode dot ca>
 license:        LGPL-3
 license-file:   LICENSE
 build-type:     Simple
+tested-with:
+    GHC ==8.10.7 || ==9.2.5 || ==9.4.3
 extra-source-files:
     CHANGELOG.md
     README.md
@@ -36,7 +38,47 @@ library
       Paths_yesod_auth_lti13
   hs-source-dirs:
       src
-  ghc-options: -Weverything -Wno-missing-exported-signatures -Wno-missing-export-lists -Wno-missing-import-lists -Wno-missed-specialisations -Wno-all-missed-specialisations -Wno-unsafe -Wno-missing-local-signatures -Wno-monomorphism-restriction -Wno-missing-safe-haskell-mode -Wno-prepositive-qualified-module -Wno-unused-packages -Wno-missing-kind-signatures
+  default-extensions:
+      AllowAmbiguousTypes
+      BlockArguments
+      DataKinds
+      DeriveAnyClass
+      DeriveFoldable
+      DeriveFunctor
+      DeriveGeneric
+      DeriveTraversable
+      DerivingVia
+      DuplicateRecordFields
+      FlexibleContexts
+      FlexibleInstances
+      FunctionalDependencies
+      GADTs
+      GeneralizedNewtypeDeriving
+      ImportQualifiedPost
+      InstanceSigs
+      LambdaCase
+      LexicalNegation
+      MonoLocalBinds
+      MultiWayIf
+      NamedFieldPuns
+      NoImplicitPrelude
+      NumericUnderscores
+      OverloadedLabels
+      OverloadedStrings
+      OverloadedRecordDot
+      PartialTypeSignatures
+      PatternSynonyms
+      PolyKinds
+      RankNTypes
+      RecordWildCards
+      RecursiveDo
+      ScopedTypeVariables
+      StandaloneDeriving
+      StandaloneKindSignatures
+      TypeApplications
+      TypeFamilies
+      ViewPatterns
+  ghc-options: -Weverything -Wno-missing-exported-signatures -Wno-missing-export-lists -Wno-missing-import-lists -Wno-missed-specialisations -Wno-all-missed-specialisations -Wno-unsafe -Wno-safe -Wno-missing-local-signatures -Wno-monomorphism-restriction -Wno-missing-safe-haskell-mode -Wno-prepositive-qualified-module -Wno-unused-packages -Wno-missing-kind-signatures
   build-depends:
       aeson >=2 && <2.2
     , aeson-pretty >=0.8.8 && <0.9
@@ -47,14 +89,15 @@ library
     , cryptonite >=0.26 && <0.31
     , http-client >=0.6.4 && <0.8
     , http-conduit >=2.3.7 && <2.4
+    , http-types
     , jose-jwt >=0.8.0 && <0.10.0
     , load-env >=0.2.1 && <0.3
     , lti13 ==0.3.0.0
     , microlens >=0.4.11 && <0.5
     , oidc-client >=0.5.1 && <0.7
-    , safe-exceptions >=0.1.7 && <0.2
     , text >=1.2.4 && <1.3
     , time >=1.0.0 && <1.12
+    , unliftio
     , warp >=3.3.13 && <3.4
     , yesod >=1.6.1 && <1.7
     , yesod-auth >=1.6.10 && <1.7
@@ -67,7 +110,47 @@ executable yesod-lti13-example
       Paths_yesod_auth_lti13
   hs-source-dirs:
       example
-  ghc-options: -Weverything -Wno-missing-exported-signatures -Wno-missing-export-lists -Wno-missing-import-lists -Wno-missed-specialisations -Wno-all-missed-specialisations -Wno-unsafe -Wno-missing-local-signatures -Wno-monomorphism-restriction -Wno-missing-safe-haskell-mode -Wno-prepositive-qualified-module -Wno-unused-packages -Wno-missing-kind-signatures -threaded -rtsopts -with-rtsopts=-N
+  default-extensions:
+      AllowAmbiguousTypes
+      BlockArguments
+      DataKinds
+      DeriveAnyClass
+      DeriveFoldable
+      DeriveFunctor
+      DeriveGeneric
+      DeriveTraversable
+      DerivingVia
+      DuplicateRecordFields
+      FlexibleContexts
+      FlexibleInstances
+      FunctionalDependencies
+      GADTs
+      GeneralizedNewtypeDeriving
+      ImportQualifiedPost
+      InstanceSigs
+      LambdaCase
+      LexicalNegation
+      MonoLocalBinds
+      MultiWayIf
+      NamedFieldPuns
+      NoImplicitPrelude
+      NumericUnderscores
+      OverloadedLabels
+      OverloadedStrings
+      OverloadedRecordDot
+      PartialTypeSignatures
+      PatternSynonyms
+      PolyKinds
+      RankNTypes
+      RecordWildCards
+      RecursiveDo
+      ScopedTypeVariables
+      StandaloneDeriving
+      StandaloneKindSignatures
+      TypeApplications
+      TypeFamilies
+      ViewPatterns
+  ghc-options: -Weverything -Wno-missing-exported-signatures -Wno-missing-export-lists -Wno-missing-import-lists -Wno-missed-specialisations -Wno-all-missed-specialisations -Wno-unsafe -Wno-safe -Wno-missing-local-signatures -Wno-monomorphism-restriction -Wno-missing-safe-haskell-mode -Wno-prepositive-qualified-module -Wno-unused-packages -Wno-missing-kind-signatures -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       aeson
     , aeson-pretty
@@ -78,14 +161,15 @@ executable yesod-lti13-example
     , cryptonite >=0.26 && <0.31
     , http-client >=0.6.4 && <0.8
     , http-conduit
+    , http-types
     , jose-jwt >=0.8.0 && <0.10.0
     , load-env
     , lti13 ==0.3.0.0
     , microlens >=0.4.11 && <0.5
     , oidc-client >=0.5.1 && <0.7
-    , safe-exceptions >=0.1.7 && <0.2
     , text
     , time >=1.0.0 && <1.12
+    , unliftio
     , warp
     , yesod
     , yesod-auth
@@ -93,4 +177,89 @@ executable yesod-lti13-example
     , yesod-core >=1.6.18 && <1.7
   if !(flag(example))
     buildable: False
+  default-language: Haskell2010
+
+test-suite spec
+  type: exitcode-stdio-1.0
+  main-is: Spec.hs
+  other-modules:
+      Yesod.Auth.LTI13Spec
+      Paths_yesod_auth_lti13
+  hs-source-dirs:
+      tests
+  default-extensions:
+      AllowAmbiguousTypes
+      BlockArguments
+      DataKinds
+      DeriveAnyClass
+      DeriveFoldable
+      DeriveFunctor
+      DeriveGeneric
+      DeriveTraversable
+      DerivingVia
+      DuplicateRecordFields
+      FlexibleContexts
+      FlexibleInstances
+      FunctionalDependencies
+      GADTs
+      GeneralizedNewtypeDeriving
+      ImportQualifiedPost
+      InstanceSigs
+      LambdaCase
+      LexicalNegation
+      MonoLocalBinds
+      MultiWayIf
+      NamedFieldPuns
+      NoImplicitPrelude
+      NumericUnderscores
+      OverloadedLabels
+      OverloadedStrings
+      OverloadedRecordDot
+      PartialTypeSignatures
+      PatternSynonyms
+      PolyKinds
+      RankNTypes
+      RecordWildCards
+      RecursiveDo
+      ScopedTypeVariables
+      StandaloneDeriving
+      StandaloneKindSignatures
+      TypeApplications
+      TypeFamilies
+      ViewPatterns
+  ghc-options: -Weverything -Wno-missing-exported-signatures -Wno-missing-export-lists -Wno-missing-import-lists -Wno-missed-specialisations -Wno-all-missed-specialisations -Wno-unsafe -Wno-safe -Wno-missing-local-signatures -Wno-monomorphism-restriction -Wno-missing-safe-haskell-mode -Wno-prepositive-qualified-module -Wno-unused-packages -Wno-missing-kind-signatures
+  build-depends:
+      QuickCheck
+    , aeson
+    , aeson-pretty >=0.8.8 && <0.9
+    , base >=4.12 && <5
+    , base64-bytestring >=1.0.0 && <1.3
+    , bytestring >=0.10.10 && <0.12
+    , containers >=0.6.2 && <0.7
+    , cryptonite >=0.26 && <0.31
+    , data-default
+    , file-embed
+    , hspec
+    , http-client >=0.6.4 && <0.8
+    , http-conduit >=2.3.7 && <2.4
+    , http-types
+    , jose-jwt >=0.8.0 && <0.10.0
+    , load-env >=0.2.1 && <0.3
+    , lti13
+    , microlens >=0.4.11 && <0.5
+    , mtl
+    , oidc-client >=0.5.1 && <0.7
+    , template-haskell
+    , text >=1.2.4 && <1.3
+    , th-utilities
+    , time >=1.0.0 && <1.12
+    , transformers
+    , unliftio
+    , wai
+    , warp >=3.3.13 && <3.4
+    , yesod >=1.6.1 && <1.7
+    , yesod-auth >=1.6.10 && <1.7
+    , yesod-auth-lti13
+    , yesod-core >=1.6.18 && <1.7
+    , yesod-test
   default-language: Haskell2010

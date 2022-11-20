@@ -18,10 +18,13 @@ extra-source-files:
 
 github: lf-/lti13
 
+tested-with: GHC ==8.10.7 || ==9.2.5 || ==9.4.3
+
 default-extensions:
     - NamedFieldPuns
     - OverloadedStrings
     - RecordWildCards
+    - DerivingStrategies
     - DeriveGeneric
 
 dependencies:
