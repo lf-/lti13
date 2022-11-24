@@ -39,7 +39,7 @@
           };
 
           # for debugging
-          # inherit pkgs;
+          inherit pkgs;
 
           devShells.default =
             let haskellPackages = pkgs.haskell.packages.${ghcVer};
@@ -68,7 +68,16 @@
               lti13 = hprev.callCabal2nix "lti13" ./lti13 { };
               yesod-auth-lti13 = hprev.callCabal2nix "yesod-auth-lti13" ./yesod-auth-lti13 { };
 
-              # For some reason the test suite hangs.
+              # spec calls google
+              oidc-client = hlib.dontCheck (hfinal.callHackageDirect
+                {
+                  pkg = "oidc-client";
+                  ver = "0.7.0.1";
+                  sha256 = "sha256-nWEh9qwrQNlmYlztGw+F/r4SBWVHpc6aUeEq/8cDDXU=";
+                }
+                { });
+
+              # For some reason (ghc bug) the test suite hangs.
               ListLike = hlib.dontCheck hprev.ListLike;
             });
       };

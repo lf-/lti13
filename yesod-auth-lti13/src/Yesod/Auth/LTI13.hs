@@ -78,6 +78,7 @@ import           Yesod.Core.Widget
 import Network.HTTP.Types (unauthorized401, badRequest400)
 import qualified Data.Text as T
 import UnliftIO.Exception (Exception, throwIO, catch)
+import Control.Monad (guard)
 
 data YesodAuthLTI13Exception
     = LTIException Text LTI13Exception
@@ -164,10 +165,13 @@ mkSessionStore name =
             setSessionBS sname state
             setSessionBS nname nonce
             return ()
-        sessionGet = do
-            state <- lookupSessionBS sname
+        sessionGet givenState = do
+            state_ <- lookupSessionBS sname
             nonce <- lookupSessionBS nname
-            return (state, nonce)
+            return do
+              state <- state_
+              guard $ givenState == state
+              nonce
         sessionDelete = do
             deleteSession sname
             deleteSession nname

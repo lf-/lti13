@@ -67,7 +67,7 @@ dependencies:
   - http-client       >= 0.6.4 && < 0.8
   - text              (>= 1.2.4 && < 1.3) || (>= 2.0 && < 2.1)
   - microlens         >= 0.4.11 && < 0.5
-  - oidc-client       >= 0.5.1 && < 0.8
+  - oidc-client       >= 0.7 && < 0.8
   - aeson             >= 2 && < 2.2
   - yesod-auth        >= 1.6.10 && < 1.7
   - http-conduit      >= 2.3.7 && < 2.4
@@ -128,6 +128,7 @@ tests:
   spec:
     main: Spec.hs
     source-dirs: tests
+    build-tools: hspec-discover
     dependencies:
       - hspec
       - QuickCheck
