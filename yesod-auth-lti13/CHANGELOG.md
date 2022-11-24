@@ -1,5 +1,14 @@
 # Revision history for yesod-auth-lti13
 
+## 0.3.0.0 -- 2022-11-23
+
+* Support newer compilers and dependencies
+    * aeson >= 2 now required;
+    * oidc-client >= 0.7 now required
+    * Support ghc-9.4
+* Write what amounts to a test suite, more or less.
+* Fix a bug where exceptions were not reported nicely.
+
 ## 0.2.0.3 -- 2021-08-10
 
 * Loosen version bounds on cryptonite

@@ -1,5 +1,12 @@
 # Revision history for lti13
 
+## 0.3.0.0 -- 2022-11-23
+
+* Support newer compilers and dependencies
+    * aeson >= 2 now required;
+    * oidc-client >= 0.7 now required
+    * Support ghc-9.4
+
 ## 0.2.0.3 -- 2021-08-10
 
 * Bump version for yesod-auth-lti13.
