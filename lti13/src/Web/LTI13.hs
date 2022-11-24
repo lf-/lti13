@@ -31,7 +31,7 @@ module Web.LTI13 (
       , handleAuthResponse
     ) where
 import           Control.Exception.Safe             (Exception, MonadCatch,
-                                                     MonadThrow, Typeable,
+                                                     MonadThrow,
                                                      catch, throw, throwM)
 import           Control.Monad                      (when, (>=>))
 import qualified Control.Monad.Fail                 as Fail
@@ -46,6 +46,7 @@ import           Data.Aeson                         (FromJSON (parseJSON),
 import qualified Data.Aeson                         as A
 import           Data.Aeson.Types                   (Parser)
 import qualified Data.Map.Strict                    as Map
+import           Data.String                        (IsString)
 import           Data.Text                          (Text)
 import qualified Data.Text                          as T
 import           Data.Text.Encoding                 (decodeUtf8, encodeUtf8)
@@ -55,6 +56,7 @@ import           Network.HTTP.Client                (HttpException, Manager,
                                                      httpLbs, parseRequest,
                                                      responseBody)
 import qualified Network.HTTP.Types.URI             as URI
+import           Prelude
 import qualified Web.OIDC.Client.Discovery.Provider as P
 import           Web.OIDC.Client.IdTokenFlow        (getValidIdTokenClaims)
 import qualified Web.OIDC.Client.Settings           as O
@@ -63,7 +65,7 @@ import           Web.OIDC.Client.Tokens             (IdTokenClaims, aud, iss,
 import           Web.OIDC.Client.Types              (Nonce, SessionStore (..))
 
 -- | Parses a JSON text field to a fixed expected value, failing otherwise
-parseFixed :: (FromJSON a, Eq a, Show a) => Object -> Text -> a -> Parser a
+parseFixed :: (FromJSON a, Eq a, Show a) => Object -> A.Key -> a -> Parser a
 parseFixed obj field fixedVal =
     obj .: field >>= \v ->
         if v == fixedVal then
@@ -81,7 +83,7 @@ data Role = Administrator
           | Learner
           | Mentor
           | Other Text
-          deriving (Show, Eq)
+          deriving stock (Show, Eq)
 
 roleFromString :: Text -> Role
 roleFromString "http://purl.imsglobal.org/vocab/lis/v2/membership#Administrator"
@@ -123,7 +125,7 @@ data LisClaim = LisClaim
     , resultSourcedId         :: Maybe Text
     -- ^ An identifier for the position in the gradebook associated with the
     --   assignment being viewed.
-    } deriving (Show, Eq)
+    } deriving stock (Show, Eq)
 
 instance FromJSON LisClaim where
     parseJSON = withObject "LisClaim" $ \v ->
@@ -162,7 +164,7 @@ data ContextClaim = ContextClaim
     , contextLabel :: Maybe Text
     , contextTitle :: Maybe Text
     }
-    deriving (Show, Eq)
+    deriving stock (Show, Eq)
 
 instance FromJSON ContextClaim where
     parseJSON = withObject "ContextClaim" $ \v ->
@@ -200,16 +202,16 @@ data UncheckedLtiTokenClaims = UncheckedLtiTokenClaims
     , lastName      :: Maybe Text
     , context       :: Maybe ContextClaim
     , lis           :: Maybe LisClaim
-    } deriving (Show, Eq)
+    } deriving stock (Show, Eq)
 
 -- | An object representing in the type system a token whose claims have been
 --   validated.
 newtype LtiTokenClaims = LtiTokenClaims { unLtiTokenClaims :: UncheckedLtiTokenClaims }
-    deriving (Show, Eq)
+    deriving stock (Show, Eq)
 
 -- | LTI token claims from which all student data has been removed. For logging.
 newtype AnonymizedLtiTokenClaims = AnonymizedLtiTokenClaims UncheckedLtiTokenClaims
-    deriving (Show, Eq)
+    deriving stock (Show, Eq)
 
 limitLength :: (Fail.MonadFail m) => Int -> Text -> m Text
 limitLength len string
@@ -217,19 +219,19 @@ limitLength len string
     = return string
 limitLength _ _ = fail "String is too long"
 
-claimMessageType :: Text
+claimMessageType :: IsString t => t
 claimMessageType = "https://purl.imsglobal.org/spec/lti/claim/message_type"
-claimVersion :: Text
+claimVersion :: IsString t => t
 claimVersion = "https://purl.imsglobal.org/spec/lti/claim/version"
-claimDeploymentId :: Text
+claimDeploymentId :: IsString t => t
 claimDeploymentId = "https://purl.imsglobal.org/spec/lti/claim/deployment_id"
-claimTargetLinkUri :: Text
+claimTargetLinkUri :: IsString t => t
 claimTargetLinkUri = "https://purl.imsglobal.org/spec/lti/claim/target_link_uri"
-claimRoles :: Text
+claimRoles :: IsString t => t
 claimRoles = "https://purl.imsglobal.org/spec/lti/claim/roles"
-claimContext :: Text
+claimContext :: IsString t => t
 claimContext = "https://purl.imsglobal.org/spec/lti/claim/context"
-claimLis :: Text
+claimLis :: IsString t => t
 claimLis = "https://purl.imsglobal.org/spec/lti/claim/lis"
 
 instance FromJSON UncheckedLtiTokenClaims where
@@ -341,7 +343,7 @@ data LTI13Exception
     | InvalidLtiToken Text
     -- ^ Token validation error. Per <http://www.imsglobal.org/spec/security/v1p0/#authentication-response-validation Security § 5.1.3>
     --   if you get this, you should return a 401.
-    deriving (Show, Typeable)
+    deriving stock (Show)
 instance Exception LTI13Exception
 
 -- | @client_id@, one or more per platform; <https://www.imsglobal.org/spec/lti/v1p3/#tool-deployment LTI spec § 3.1.3>
@@ -416,9 +418,10 @@ type RequestParams = Map.Map Text Text
 initiate :: (MonadIO m) => AuthFlowConfig m -> RequestParams -> m (Issuer, ClientId, Text)
 initiate cfg params = do
     -- we don't care about target link uri since we only support one endpoint
-    res <- liftIO $ mapM (`lookupOrThrow` params) ["iss", "login_hint", "target_link_uri"]
-    -- not actually fallible
-    let [iss, loginHint, _] = res
+    iss <- liftIO $ lookupOrThrow "iss" params
+    loginHint <- liftIO $ lookupOrThrow "login_hint" params
+    _targetLinkUri <- liftIO $ lookupOrThrow "target_link_uri" params
+
     let messageHint = Map.lookup "lti_message_hint" params
     -- "This allows for a platform to support multiple registrations from a
     -- single issuer, without relying on the initiate_login_uri as a key."
@@ -489,8 +492,8 @@ handleAuthResponse :: (MonadIO m)
     -> PlatformInfo
     -> m (Text, IdTokenClaims LtiTokenClaims)
 handleAuthResponse mgr cfg params pinfo = do
-    params' <- liftIO $ mapM (`lookupOrThrow` params) ["state", "id_token"]
-    let [state, idToken] = params'
+    state <- liftIO $ lookupOrThrow "state" params
+    idToken <- liftIO $ lookupOrThrow "id_token" params
 
     let PlatformInfo { jwksUrl } = pinfo
     jwkSet <- liftIO $ getJwkSet mgr jwksUrl

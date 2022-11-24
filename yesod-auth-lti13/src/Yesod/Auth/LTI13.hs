@@ -1,11 +1,4 @@
-{-# LANGUAGE LambdaCase        #-}
-{-# LANGUAGE NamedFieldPuns    #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes       #-}
-{-# LANGUAGE RankNTypes        #-}
-{-# LANGUAGE TemplateHaskell   #-}
-{-# LANGUAGE TypeFamilies      #-}
-
 
 -- | A Yesod authentication module for LTI 1.3
 --   See @example/Main.hs@ for a sample implementation.
@@ -47,7 +40,6 @@ module Yesod.Auth.LTI13 (
     , Nonce
     ) where
 
-import           Control.Exception.Safe     (Exception, throwIO)
 import           Control.Monad.IO.Class     (MonadIO (liftIO))
 import qualified Crypto.PubKey.RSA          as RSA
 import           Crypto.Random              (getRandomBytes)
@@ -64,6 +56,7 @@ import           Jose.Jwa                   (Alg (Signed), JwsAlg (RS256))
 import           Jose.Jwk                   (Jwk (..), JwkSet (..),
                                              KeyUse (Sig), generateRsaKeyPair)
 import           Jose.Jwt                   (KeyId (UTCKeyId))
+import           Prelude
 import           Web.LTI13
 import           Web.OIDC.Client            (Nonce)
 import           Web.OIDC.Client.Tokens     (IdTokenClaims (..))
@@ -79,9 +72,13 @@ import           Yesod.Core                 (MonadHandler,
                                              permissionDenied, redirect,
                                              runRequestBody, setSession,
                                              setSessionBS, toTypedContent)
-import           Yesod.Core.Handler         (getRouteToParent)
+import           Yesod.Core.Handler         (getRouteToParent, sendResponseStatus)
 import           Yesod.Core.Types           (TypedContent)
 import           Yesod.Core.Widget
+import Network.HTTP.Types (unauthorized401, badRequest400)
+import qualified Data.Text as T
+import UnliftIO.Exception (Exception, throwIO, catch)
+import Control.Monad (guard)
 
 data YesodAuthLTI13Exception
     = LTIException Text LTI13Exception
@@ -92,7 +89,7 @@ data YesodAuthLTI13Exception
     --   Plugin name and an error message
     | CorruptJwks Text Text
     -- ^ The jwks stored in the database are corrupt. Wat.
-    deriving (Show)
+    deriving stock (Show)
 
 instance Exception YesodAuthLTI13Exception
 
@@ -168,10 +165,13 @@ mkSessionStore name =
             setSessionBS sname state
             setSessionBS nname nonce
             return ()
-        sessionGet = do
-            state <- lookupSessionBS sname
+        sessionGet givenState = do
+            state_ <- lookupSessionBS sname
             nonce <- lookupSessionBS nname
-            return (state, nonce)
+            return do
+              state <- state_
+              guard $ givenState == state
+              nonce
         sessionDelete = do
             deleteSession sname
             deleteSession nname
@@ -219,8 +219,16 @@ rsaPrivToPub (RsaPrivateJwk privKey mId mUse mAlg) =
     RsaPublicJwk (RSA.private_pub privKey) mId mUse mAlg
 rsaPrivToPub _ = error "rsaPrivToPub called on a Jwk that's not a RsaPrivateJwk"
 
+lti13ExceptionToYesod :: (MonadHandler m) => LTI13Exception -> m a
+lti13ExceptionToYesod e@(InvalidHandshake _) = sendResponseStatus badRequest400 (T.pack . show $ e)
+lti13ExceptionToYesod e@(InvalidLtiToken _) = sendResponseStatus unauthorized401 (T.pack . show $ e)
+-- These ones should be handled as internal server errors so they get into a
+-- log
+lti13ExceptionToYesod e@(DiscoveryException _) = throwIO e
+lti13ExceptionToYesod e@(GotHttpException _) = throwIO e
+
 dispatchInitiate
-    :: YesodAuthLTI13 master
+    :: (YesodAuthLTI13 master)
     => PluginName
     -- ^ Name of the provider
     -> RequestParams
@@ -234,7 +242,7 @@ dispatchInitiate name params = do
     let authUrl = render $ tm url
 
     let cfg = makeCfg name retrievePlatformInfo checkSeenNonce authUrl
-    (iss, cid, redir) <- initiate cfg params
+    (iss, cid, redir) <- initiate cfg params `catch` lti13ExceptionToYesod
     setSession (myIss name) iss
     setSession (myCid name) cid
     redirect redir

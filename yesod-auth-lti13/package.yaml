@@ -1,0 +1,151 @@
+name: yesod-auth-lti13
+version: 0.3.0.0
+synopsis: A yesod-auth plugin for LTI 1.3
+description: >
+  A plugin using <https://hackage.haskell.org/package/lti13>
+  to implement IMS Global LTI 1.3 authentication for
+  yesod-auth.
+author: Jade Lovelace
+maintainer: Jade Lovelace <software at lfcode dot ca>
+category: Web, Yesod
+license-file: LICENSE
+extra-source-files:
+  - CHANGELOG.md
+  - README.md
+
+github: lf-/lti13
+
+tested-with: GHC ==8.10.7 || ==9.2.5 || ==9.4.3
+
+default-extensions:
+  - AllowAmbiguousTypes
+  - BlockArguments
+  - DataKinds
+  - DeriveAnyClass
+  - DeriveFoldable
+  - DeriveFunctor
+  - DeriveGeneric
+  - DeriveTraversable
+  - DerivingVia
+  - DuplicateRecordFields
+  - FlexibleContexts
+  - FlexibleInstances
+  - FunctionalDependencies
+  - GADTs
+  - GeneralizedNewtypeDeriving
+  - ImportQualifiedPost
+  - InstanceSigs
+  - LambdaCase
+  - MonoLocalBinds
+  - MultiWayIf
+  - NamedFieldPuns
+  - NoImplicitPrelude
+  - NumericUnderscores
+  - OverloadedLabels
+  - OverloadedStrings
+  - PartialTypeSignatures
+  - PatternSynonyms
+  - PolyKinds
+  - RankNTypes
+  - RecordWildCards
+  - RecursiveDo
+  - ScopedTypeVariables
+  - StandaloneDeriving
+  - StandaloneKindSignatures
+  - TypeApplications
+  - TypeFamilies
+  - ViewPatterns
+
+dependencies:
+  - base >=4.12 && <5
+  # these two are always updated in concert with each other
+  - lti13             == 0.3.0.0
+  - base64-bytestring >= 1.0.0 && < 1.3
+  - bytestring        >= 0.10.10 && < 0.12
+  - containers        >= 0.6.2 && < 0.7
+  - cryptonite        >= 0.26 && < 0.31
+  - http-client       >= 0.6.4 && < 0.8
+  - text              (>= 1.2.4 && < 1.3) || (>= 2.0 && < 2.1)
+  - microlens         >= 0.4.11 && < 0.5
+  - oidc-client       >= 0.7 && < 0.8
+  - aeson             >= 2 && < 2.2
+  - yesod-auth        >= 1.6.10 && < 1.7
+  - http-conduit      >= 2.3.7 && < 2.4
+  - http-types
+  - yesod-core        >= 1.6.18 && < 1.7
+  - warp              >= 3.3.13 && < 3.4
+  - aeson-pretty      >= 0.8.8 && < 0.9
+  - load-env          >= 0.2.1 && < 0.3
+  - yesod             >= 1.6.1 && < 1.7
+  - jose-jwt          >= 0.8.0 && < 0.10.0
+  - time              >= 1.0.0 && < 1.13
+  - unliftio
+
+# from https://medium.com/mercury-bank/enable-all-the-warnings-a0517bc081c3
+ghc-options:
+  - -Weverything
+  - -Wno-missing-exported-signatures # missing-exported-signatures turns off the more strict -Wmissing-signatures. See https://ghc.haskell.org/trac/ghc/ticket/14794#ticket
+  - -Wno-missing-export-lists # Requires explicit export lists for every module, a pain for large modules
+  - -Wno-missing-import-lists # Requires explicit imports of _every_ function (e.g. '$'); too strict
+  - -Wno-missed-specialisations # When GHC can't specialize a polymorphic function. No big deal and requires fixing underlying libraries to solve.
+  - -Wno-all-missed-specialisations # See missed-specialisations
+  - -Wno-unsafe # Don't use Safe Haskell warnings
+  - -Wno-safe # Don't use Safe Haskell warnings
+  - -Wno-missing-local-signatures # Warning for polymorphic local bindings. Don't think this is an issue
+  - -Wno-monomorphism-restriction # Don't warn if the monomorphism restriction is used
+  - -Wno-missing-safe-haskell-mode # Cabal isn’t setting this currently (introduced in GHC 8.10)
+  - -Wno-prepositive-qualified-module # Cabal’s generate Path_*.hs doesn’t do this (fixed in https://github.com/haskell/cabal/pull/7352)
+  - -Wno-unused-packages # Some tooling gives this error
+  - -Wno-missing-kind-signatures # Warns on literally every type
+
+library:
+  source-dirs: src
+
+executables:
+  yesod-lti13-example:
+    when:
+      - condition: "!(flag(example))"
+        buildable: false
+    main: Main.hs
+    source-dirs: example
+    ghc-options: -threaded -rtsopts -with-rtsopts=-N
+
+    dependencies:
+      - aeson
+      - aeson-pretty
+      - base >=4.9.0.0 && <5
+      - bytestring
+      - containers
+      - http-conduit
+      - load-env
+      - text
+      - warp
+      - yesod
+      - yesod-auth
+      - yesod-auth-lti13
+
+tests:
+  spec:
+    main: Spec.hs
+    source-dirs: tests
+    build-tools: hspec-discover
+    dependencies:
+      - hspec
+      - QuickCheck
+      - file-embed
+      - th-utilities
+      - template-haskell
+      - mtl
+      - transformers
+      - yesod-test
+      - yesod-auth-lti13
+      - lti13
+      - data-default
+      - wai
+      - aeson
+
+flags:
+  example:
+    description: Should I build the Yesod example?
+    manual: False
+    default: False
