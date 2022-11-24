@@ -1,6 +1,7 @@
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE TypeOperators #-}
 {-# OPTIONS_GHC -Wno-unused-top-binds #-}
 
 module Yesod.Auth.LTI13Spec (spec) where
