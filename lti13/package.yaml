@@ -67,3 +67,4 @@ tests:
             - QuickCheck
             - file-embed
             - th-utilities
+            - lti13

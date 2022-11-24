@@ -3,6 +3,7 @@
 module AnonSpec (spec) where
 
 import Test.Hspec hiding (context)
+import Prelude
 import Web.LTI13
 
 exampleToken :: UncheckedLtiTokenClaims

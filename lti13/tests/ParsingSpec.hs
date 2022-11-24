@@ -9,6 +9,7 @@ import TH.RelativePaths
 import Web.LTI13
 import qualified Web.LTI13 as LTI
 import Data.Aeson
+import Prelude
 import qualified Data.ByteString as BS
 
 -- | This is lifted directly from section E of the LTI 1.3 spec.
