@@ -78,7 +78,7 @@ dependencies:
   - load-env          >= 0.2.1 && < 0.3
   - yesod             >= 1.6.1 && < 1.7
   - jose-jwt          >= 0.8.0 && < 0.10.0
-  - time              >= 1.0.0 && < 1.12
+  - time              >= 1.0.0 && < 1.13
   - unliftio
 
 # from https://medium.com/mercury-bank/enable-all-the-warnings-a0517bc081c3
